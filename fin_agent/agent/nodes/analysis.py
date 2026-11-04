@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-import re
-
 from langgraph.types import Send
 
 from fin_agent.agent.prompts import (
-    ANALYST_SYSTEM, DISCLAIMER, LANG_NAMES, LENS_PROMPT, LENS_SCHEMA, QA_PROMPT, QA_SCHEMA,
+    ANALYST_SYSTEM, LANG_NAMES, LENS_PROMPT, LENS_SCHEMA, QA_PROMPT, QA_SCHEMA,
     RECOMMEND_PROMPT, RECOMMEND_SCHEMA,
 )
-from fin_agent.agent.state import DEPTH_LENSES, MAX_CRITIC_RETRIES, AgentState
+from fin_agent.agent.state import DEPTH_LENSES, LLM_CALL_BUDGET, MAX_CRITIC_RETRIES, AgentState
+from fin_agent.guards.guards import ensure_disclaimer, guard_answer, guard_claim, guard_recommendation
 from fin_agent.llm.base import LLMError, LLMProvider
 
 NEEDS_MARKET_DATA = {"valuation"}  # until a price provider exists
@@ -68,50 +67,9 @@ def make_lens(llm: LLMProvider):
 
 # ---------- critic (claim-to-number reconciliation, guardrails layer 3) ----------
 
-NUM_RE = re.compile(r"(-?\d[\d,]*\.?\d*)\s*(%|x\b|days?\b|ngày)?", re.I)
-
-
-def _numbers_in(text: str) -> list[tuple[float, str, float]]:
-    """(value, kind, half_precision) for numbers worth checking: %, x, days, or decimals/thousands."""
-    out = []
-    for m in NUM_RE.finditer(text):
-        raw, suffix = m.group(1), (m.group(2) or "").lower()
-        clean = raw.replace(",", "")
-        try:
-            v = float(clean)
-        except ValueError:
-            continue
-        if not suffix and ("." not in clean and "," not in raw):
-            continue  # bare integers: years, counts, list numbers
-        if not suffix and 1900 <= v <= 2100:
-            continue
-        decimals = len(clean.split(".")[1]) if "." in clean else 0
-        kind = "pct" if suffix == "%" else "x" if suffix == "x" else "days" if suffix.startswith(("day", "ngày")) else "amount"
-        out.append((v, kind, 0.5 * 10 ** (-decimals)))
-    return out
-
-
-def _matches(v: float, kind: str, half: float, m: dict) -> bool:
-    target = m["value"] * 100 if m["unit"] == "ratio" else m["value"]
-    if kind == "pct" and m["unit"] != "ratio":
-        return False
-    tol = max(half, abs(target) * 0.005)
-    return abs(abs(v) - abs(target)) <= tol + 1e-9
-
-
-def check_claim(claim: str, metric_ids: list[str], by_id: dict[str, dict]) -> list[str]:
-    issues = []
-    unknown = [i for i in metric_ids if i not in by_id]
-    if unknown:
-        issues.append(f"Unknown metric ids: {', '.join(unknown)}")
-    cited = [by_id[i] for i in metric_ids if i in by_id]
-    if not cited:
-        issues.append(f"No valid metric cited for: {claim[:80]!r}")
-        return issues
-    for v, kind, half in _numbers_in(claim):
-        if not any(_matches(v, kind, half, m) for m in cited):
-            issues.append(f"Number {v:g}{'%' if kind == 'pct' else ''} in {claim[:60]!r} does not match any cited metric")
-    return issues
+def check_claim(claim: str, metric_ids: list[str], by_id: dict[str, dict], direction: str | None = None) -> list[str]:
+    """Run the claim guard (numeric reconciliation, direction, no guarantees)."""
+    return guard_claim({"claim": claim, "metric_ids": metric_ids, "direction": direction}, by_id)
 
 
 def critic(state: AgentState) -> dict:
@@ -124,7 +82,7 @@ def critic(state: AgentState) -> dict:
             continue
         lens_issues, kept = [], []
         for f in out.get("findings", []):
-            problems = check_claim(f.get("claim", ""), f.get("metric_ids", []), by_id)
+            problems = check_claim(f.get("claim", ""), f.get("metric_ids", []), by_id, f.get("direction"))
             if problems:
                 lens_issues += problems
             else:
@@ -135,7 +93,12 @@ def critic(state: AgentState) -> dict:
         cleaned[lens] = {**out, "findings": kept, "rejected": len(out.get("findings", [])) - len(kept)}
 
     retries = state.get("retries", 0)
-    if issues and retries < MAX_CRITIC_RETRIES:
+    budget = LLM_CALL_BUDGET[state["request"]["depth"]]
+    over_budget = state.get("llm_calls", 0) + len(issues) + 1 > budget
+    if issues and over_budget:
+        log.append({"layer": "process", "check": "llm_budget", "action": "stop_retries",
+                    "detail": f"{state.get('llm_calls', 0)} calls used of {budget}"})
+    if issues and retries < MAX_CRITIC_RETRIES and not over_budget:
         return {"critic": {"issues": issues, "retry": list(issues)}, "retries": retries + 1, "guardrail_log": log}
     if issues:
         log.append({"layer": "process", "check": "loop_limit", "action": "ship_low_confidence", "detail": f"lenses still failing: {list(issues)}"})
@@ -170,20 +133,28 @@ def make_recommender(llm: LLMProvider):
             skill=state["skills"].get("recommendation", {}).get("text", ""),
             findings="\n".join(lines) or "(none)", not_assessed=", ".join(not_assessed) or "none",
         )
-        log = []
-        try:
-            rec = llm.complete(_system(req), prompt, RECOMMEND_SCHEMA).data or {}
-        except LLMError as exc:
-            return {"error": f"Recommender failed: {exc}", "llm_calls": 1}
-        if len(rec.get("key_risks", [])) < 3:
-            log.append({"layer": "output", "check": "risk_balance", "action": "flag", "detail": f"only {len(rec.get('key_risks', []))} risks"})
-            rec["risk_balance_warning"] = True
+        log, calls, rec, feedback = [], 0, {}, ""
+        for attempt in range(2):  # one re-ask if guards fail
+            try:
+                rec = llm.complete(_system(req), prompt + feedback, RECOMMEND_SCHEMA).data or {}
+            except LLMError as exc:
+                return {"error": f"Recommender failed: {exc}", "llm_calls": calls + 1}
+            calls += 1
+            problems = guard_recommendation(rec)
+            if not problems:
+                break
+            log.append({"layer": "output", "check": "recommendation_guard", "action": "reask" if attempt == 0 else "flag",
+                        "detail": "; ".join(problems)[:300]})
+            feedback = "\n\nYour previous answer failed review. Fix:\n- " + "\n- ".join(problems)
+        else:
+            rec["guardrail_warning"] = problems
         if any(o.get("low_confidence") for o in findings.values()) and rec.get("confidence") == "high":
             rec["confidence"] = "medium"
             log.append({"layer": "output", "check": "confidence_cap", "action": "fix", "detail": "high -> medium (low-confidence lens)"})
-        rec["disclaimer"] = DISCLAIMER.get(req.get("language", "en"), DISCLAIMER["en"])
+        lang = req.get("language", "en")
+        rec["disclaimer"] = ensure_disclaimer(rec.get("disclaimer", ""), lang).strip()
         rec["not_assessed"] = not_assessed
-        return {"recommendation": rec, "guardrail_log": log, "llm_calls": 1}
+        return {"recommendation": rec, "guardrail_log": log, "llm_calls": calls}
 
     return recommend
 
@@ -206,14 +177,14 @@ def make_qa(llm: LLMProvider):
             except LLMError as exc:
                 return {"error": f"Q&A failed: {exc}", "llm_calls": calls + 1}
             calls += 1
-            problems = check_claim(ans.get("answer", ""), ans.get("metric_ids", []), by_id)
+            problems = guard_answer(ans, by_id)
             if not problems:
                 break
             log.append({"layer": "output", "check": "numeric_reconciliation", "action": "reask", "detail": "; ".join(problems)[:300]})
             feedback = "\n\nYour previous answer failed review:\n- " + "\n- ".join(problems)
         else:
             ans["low_confidence"] = True
-        ans["disclaimer"] = DISCLAIMER.get(req.get("language", "en"), DISCLAIMER["en"])
+        ans["disclaimer"] = ensure_disclaimer("", req.get("language", "en")).strip()
         return {"answer": ans, "guardrail_log": log, "llm_calls": calls}
 
     return qa

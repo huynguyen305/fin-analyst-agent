@@ -93,7 +93,7 @@ Validated findings by lens:
 Lenses not assessed: {not_assessed}
 </data>
 
-Give the overall view.
+Give the overall view in plain language. Quote figures as shown above, but do not paste metric ids into the text.
 """
 
 RECOMMEND_SCHEMA = {

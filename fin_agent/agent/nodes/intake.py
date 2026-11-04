@@ -9,6 +9,7 @@ from langgraph.types import interrupt
 
 from fin_agent.agent.prompts import INTAKE_SCHEMA, INTAKE_SYSTEM
 from fin_agent.agent.state import DEPTH_YEARS, AgentState
+from fin_agent.guards.guards import guard_input
 from fin_agent.llm.base import LLMError, LLMProvider
 
 VI_CHARS = re.compile(r"[ăâđêôơưàảãáạằẳẵắặầẩẫấậèẻẽéẹềểễếệìỉĩíịòỏõóọồổỗốộờởỡớợùủũúụừửữứựỳỷỹýỵ]", re.I)
@@ -46,7 +47,7 @@ def make_intake(llm: LLMProvider):
         text = state["user_input"]
         if state.get("clarification"):
             text = f"{text}\n(User clarification: {state['clarification']})"
-        log = []
+        text, log = guard_input(text)
         calls = 0
         try:
             res = llm.complete(INTAKE_SYSTEM.format(today=date.today().isoformat()), text, INTAKE_SCHEMA)

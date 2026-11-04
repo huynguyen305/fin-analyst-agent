@@ -43,7 +43,8 @@ def _parse_note(path: Path) -> tuple[dict, str]:
 
 def load_skill_packs(lenses: list[str], sector: Sector, vault_path: str | None = None) -> dict[str, SkillPack]:
     vault_path = vault_path or os.getenv("VAULT_PATH")
-    vault_notes: dict[str, list[tuple[str, str]]] = {}
+    # lens -> {"specific": [...], "all": [...]}: sector-specific notes replace generic ones
+    vault_notes: dict[str, dict[str, list[tuple[str, str]]]] = {}
     if vault_path:
         root = Path(vault_path)
         for p in sorted((root / SKILLS_SUBDIR).glob("*.md")):
@@ -54,11 +55,14 @@ def load_skill_packs(lenses: list[str], sector: Sector, vault_path: str | None =
             note_sector = str(meta.get("fa_sector", "all"))
             if note_sector not in ("all", sector.value):
                 continue
-            vault_notes.setdefault(str(meta.get("fa_lens", "")), []).append((str(p.relative_to(root)), body.strip()))
+            bucket = "all" if note_sector == "all" else "specific"
+            vault_notes.setdefault(str(meta.get("fa_lens", "")), {"specific": [], "all": []})[bucket].append(
+                (p.relative_to(root).as_posix(), body.strip()))
 
     packs: dict[str, SkillPack] = {}
     for lens in lenses + ["recommendation", "qa"]:
-        notes = vault_notes.get(lens, [])
+        buckets = vault_notes.get(lens, {"specific": [], "all": []})
+        notes = buckets["specific"] or buckets["all"]
         if notes:
             packs[lens] = SkillPack(lens, "\n\n".join(b for _, b in notes), [p for p, _ in notes])
         else:
