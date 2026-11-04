@@ -135,14 +135,23 @@ class VnstockProvider(StatementProvider):
 
     def __init__(self, source: str = "VCI"):
         self.source = source
-        try:
-            from vnstock import Vnstock  # type: ignore
-        except ImportError:
+        import_errors = []
+        Vnstock = None
+        for module in ("vnstock", "vnstock3"):
             try:
-                from vnstock3 import Vnstock  # type: ignore
-            except ImportError as exc:
-                raise ProviderError("vnstock is not installed: pip install vnstock (or vnstock3)") from exc
-        self._client = Vnstock()
+                Vnstock = __import__(module, fromlist=["Vnstock"]).Vnstock
+                break
+            except Exception as exc:  # ImportError, or a broken install raising something else
+                import_errors.append(f"{module}: {type(exc).__name__}: {exc}")
+        if Vnstock is None:
+            raise ProviderError(
+                "could not import vnstock or vnstock3. Install one into this venv "
+                "(e.g. `pip install vnstock3`). Details: " + " | ".join(import_errors)
+            )
+        try:
+            self._client = Vnstock()
+        except Exception as exc:
+            raise ProviderError(f"vnstock failed to start: {type(exc).__name__}: {exc}") from exc
 
     def fetch(self, ticker: str, years: int, freq: str = "annual") -> Statements:
         period = "year" if freq == "annual" else "quarter"

@@ -101,3 +101,23 @@ def test_vnstock_column_mapping_and_rescale():
     assert df.loc[df.index[-1], "gross_profit"] == pytest.approx(400)
     assert df.loc[df.index[-1], "equity"] == pytest.approx(1000)
     assert any("rescaled" in n for n in notes)
+
+
+def test_missing_vnstock_explains_why(monkeypatch):
+    import builtins
+
+    from fin_agent.data.providers import ProviderError, fetch_statements
+
+    monkeypatch.delenv("FIN_AGENT_FIXTURES")
+    real_import = builtins.__import__
+
+    def fake_import(name, *a, **k):
+        if name in ("vnstock", "vnstock3"):
+            raise ImportError(f"No module named '{name}'")
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    with pytest.raises(ProviderError) as e:
+        fetch_statements("FPT", "HOSE", 3)
+    msg = str(e.value)
+    assert "vnstock not available" in msg and "pip install vnstock3" in msg and "No module named" in msg

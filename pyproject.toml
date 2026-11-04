@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-vn = ["vnstock3>=3.2"]          # or `vnstock`, see README
+# vn: vnstock is quarantined on PyPI (2026-11-04) and vnstock3 depends on the removed `vnai`; see README
 api = ["anthropic>=0.40"]
 dev = ["pytest>=8"]
 ui = ["streamlit>=1.40"]

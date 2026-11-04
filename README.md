@@ -21,7 +21,7 @@ The design, decisions and roadmap live in the Obsidian vault (`MyObsidian/Projec
 git clone https://github.com/huynguyen305/fin-analyst-agent.git
 cd fin-analyst-agent
 python -m venv .venv
-.venv\Scripts\pip install -e ".[dev,vn,ui]"
+.venv\Scripts\pip install -e ".[dev,ui]"
 copy .env.example .env      # then edit VAULT_PATH, SEC_USER_AGENT
 
 # Uses your Claude subscription through the Claude Code CLI login (run `claude` once to sign in)
@@ -106,7 +106,7 @@ tests/         offline tests on synthetic fixtures (DEMO, DEMOBANK: invented num
 
 ## Known limits and things to verify
 
-- **vnstock install route.** On 2026-11-04 `pip install vnstock` returned *not found* from the build machine, while `vnstock3` 3.2.1 installed. The provider tries both. Column mapping uses regex patterns: check the `notes` of the first real run (`--json`) and adjust `COLUMN_PATTERNS` if a line item is missed.
+- **vnstock is quarantined on PyPI.** As of 2026-11-04 PyPI marks `vnstock` as *quarantined* (PyPI does this while a malware or security report is investigated), and `vnstock3` cannot install because its dependency `vnai` was removed. Do not install either from another source until the reason is clear. The HOSE provider is being replaced by a dependency-free one; run `python scripts/probe_vn_sources.py FPT` to see which public sources answer from your network.
 - **Not tested against live market data yet.** The build machine had no access to VN broker APIs or SEC EDGAR. Live runs happen on your PC, and the step 4 pilot will verify them.
 - **Claude subscription.** Works through the Claude Agent SDK and your local Claude Code login (personal, local use, within your plan's rate limits). Large eval sweeps may need `anthropic_api`.
 - **Banks.** NPL and CAR usually sit in the notes, not the main statements, so they show as missing unless a source provides them.
