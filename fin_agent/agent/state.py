@@ -18,6 +18,7 @@ DEPTH_LENSES = {
 }
 DEPTH_YEARS = {"quick": 3, "standard": 5, "360": 8}
 MAX_CRITIC_RETRIES = 2
+LLM_CALL_BUDGET = {"quick": 15, "standard": 40, "360": 90}  # per run (guardrails layer 2)
 
 
 class Request(TypedDict, total=False):
@@ -47,3 +48,7 @@ class AgentState(TypedDict, total=False):
     guardrail_log: Annotated[list[dict], operator.add]
     llm_calls: Annotated[int, operator.add]
     error: str
+    sync: bool  # set by the caller: run the review checkpoint and vault sync
+    run_id: str
+    review: dict  # {"action": "approve" | "reject", "feedback": str}
+    vault_sync: dict  # SyncResult as dict

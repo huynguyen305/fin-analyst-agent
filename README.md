@@ -11,8 +11,8 @@ The design, decisions and roadmap live in the Obsidian vault (`MyObsidian/Projec
 | Step | Scope | State |
 | --- | --- | --- |
 | 1 | Design spec in the vault | ✅ in review |
-| 2 | Data layer, metrics, LLM adapter, LangGraph agents, CLI | ✅ this version |
-| 3 | Guardrails AI validators, vault loader + PR writer, Streamlit UI | ⏳ next |
+| 2 | Data layer, metrics, LLM adapter, LangGraph agents, CLI | ✅ |
+| 3 | Guardrails AI validators, review checkpoint + vault PR writer, Streamlit UI | ✅ this version |
 | 4 | ADK evals, 3-ticker HOSE pilot | ⏳ |
 
 ## Quick start (Windows PowerShell)
@@ -21,12 +21,18 @@ The design, decisions and roadmap live in the Obsidian vault (`MyObsidian/Projec
 git clone https://github.com/huynguyen305/fin-analyst-agent.git
 cd fin-analyst-agent
 python -m venv .venv
-.venv\Scripts\pip install -e ".[dev,vn]"
+.venv\Scripts\pip install -e ".[dev,vn,ui]"
 copy .env.example .env      # then edit VAULT_PATH, SEC_USER_AGENT
 
 # Uses your Claude subscription through the Claude Code CLI login (run `claude` once to sign in)
 .venv\Scripts\python -m fin_agent "Phân tích HPG 5 năm, toàn diện"
 .venv\Scripts\python -m fin_agent "Why are FPT's receivables growing faster than revenue?"
+
+# Local UI (http://localhost:8501)
+.venv\Scripts\streamlit run app/ui.py
+
+# Review the result, then write it to the vault as a branch + PR (needs VAULT_PATH; `gh` CLI opens the PR, else you get a compare link)
+.venv\Scripts\python -m fin_agent "Analyze FPT, 360" --sync
 
 # Offline demo on a synthetic company (no market data needed)
 $env:FIN_AGENT_FIXTURES="tests/fixtures"; .venv\Scripts\python -m fin_agent "Analyze DEMO, standard depth"
@@ -45,7 +51,23 @@ request ─► intake (NL → ticker, period, depth; asks you if unclear)
         ─► load skills (vault Analyst_Skills notes, built-in fallback)
         ─► lens analysts in parallel ─► critic (claim ↔ number check, max 2 retries) ─► recommender
         └► (questions) analyst Q&A ─► same number check
+        ─► (with --sync / UI toggle) human review ─► vault writer (temp git worktree → branch → PR, never main)
 ```
+
+### Guardrails (Guardrails AI validators in `fin_agent/guards/`)
+
+| Layer | Checks |
+| --- | --- |
+| Input | prompt injection (EN/VI) stripped, PII redacted, missing ticker → asks you, period capped |
+| Process | data-quality gate, critic retries max 2, LLM-call budget per depth, human review before any vault write |
+| Output | numeric reconciliation, direction vs metric polarity, no guarantees (EN/VI), risk balance, disclaimer |
+| Vault | path allowlist, secret scan, wikilink check, PR only |
+
+Guardrails AI's remote telemetry is switched off in code (`OTEL_SDK_DISABLED`, `enable_metrics=False`) so prompts never leave your machine except to Claude.
+
+### What gets written to the vault
+
+Report, statements snapshot (`.md` + `.csv`) and company hub under `Intelligence/Investment_Analysis/Company_Analysis/<TICKER>/`; Q&A under `Analyst_QA/`; run log and learning proposals under `Projects/FinAnalystAgent/`. Skills are read from `Intelligence/Investment_Analysis/Analyst_Skills/` (sector notes override generic ones).
 
 | Depth | Lenses | History |
 | --- | --- | --- |
@@ -63,6 +85,9 @@ fin_agent/
   data/        schema.py (canonical schema + DQ gate), providers/{vnstock_provider,edgar,fixture}.py
   metrics/     library.py (pure, tested ratio functions with metric ids)
   llm/         base.py, providers.py (Claude subscription | Anthropic API | fake), langchain_adapter.py
+  guards/      validators.py (Guardrails AI validators), guards.py (composed guards used by the graph)
+  vault/       render.py (notes), writer.py (git worktree + PR), sync.py (run → files + learning proposals)
+app/ui.py      Streamlit UI
   skills/      loader.py (vault → skill packs), defaults.py (fallback rules)
 tests/         offline tests on synthetic fixtures (DEMO, DEMOBANK: invented numbers, not real issuers)
 ```
@@ -77,6 +102,7 @@ tests/         offline tests on synthetic fixtures (DEMO, DEMOBANK: invented num
 | `VNSTOCK_SOURCE` | `VCI` (default) or `TCBS` |
 | `SEC_USER_AGENT` | Required by SEC EDGAR: `app-name your-email` |
 | `FIN_AGENT_FIXTURES` | Directory of JSON fixtures; forces offline data |
+| `FIN_AGENT_VAULT_PUSH` | `0` = commit to a local branch only, no push |
 
 ## Known limits and things to verify
 
