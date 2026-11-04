@@ -1,0 +1,32 @@
+[project]
+name = "fin-analyst-agent"
+version = "0.1.0"
+description = "Agentic financial statement analyst: LangGraph orchestration, vault-driven skills, deterministic metrics."
+requires-python = ">=3.11"
+dependencies = [
+  "langgraph>=1.2",
+  "langchain-core>=1.7",
+  "pandas>=2.2",
+  "pydantic>=2.7",
+  "pyyaml>=6",
+  "claude-agent-sdk>=0.2",
+]
+
+[project.optional-dependencies]
+vn = ["vnstock3>=3.2"]          # or `vnstock`, see README
+api = ["anthropic>=0.40"]
+dev = ["pytest>=8"]
+# step 3/4: guardrails-ai, google-adk, streamlit
+
+[project.scripts]
+fin-agent = "fin_agent.cli:main"
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["fin_agent*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
