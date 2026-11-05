@@ -103,6 +103,55 @@ def test_vnstock_column_mapping_and_rescale():
     assert any("rescaled" in n for n in notes)
 
 
+def _long(rows):
+    """vnstock 5 long format: one row per (period, line item); expenses signed negative."""
+    return pd.DataFrame(
+        [{"period": p, "id": n.upper().replace(" ", "_"), "name": n, "order": i, "level": 1,
+          "unit": "VNĐ", "value": v} for i, (p, n, v) in enumerate(rows)]
+    )
+
+
+def test_vnstock5_long_format_pivot_and_mapping():
+    income = _long([
+        (p, n, v) for p, scale in (("2024", 1.0), ("2025", 1.2)) for n, v in (
+            ("Revenue", 1.02e12), ("Net Revenue", 1.0e12), ("Cost of Goods Sold", -0.7e12),
+            ("Gross Profit", 0.3e12), ("Selling Expenses", -0.05e12),
+            ("General and Administrative Expenses", -0.03e12),
+            ("Net Profit After Tax", 0.11e12),
+            ("Profit After Tax for Shareholders of Parent Company", 0.1e12),
+        ) for v in [v * scale]
+    ])
+    balance = _long([
+        (p, n, v) for p in ("2024", "2025") for n, v in (
+            ("Short Term Assets", 0.9e12), ("Cash and Precious Metals", 0.2e12),
+            ("Total Assets", 2.0e12), ("Total Liabilities", 1.2e12), ("Owners Equity", 0.8e12),
+        )
+    ]).assign(off_balance=False)
+    cash_flow = _long([
+        (p, n, v) for p in ("2024", "2025") for n, v in (
+            ("Net Cash Flows from Operating Activities", 0.15e12),
+            ("Cash and Cash Equivalents At Beginning of Period", 0.05e12),
+            ("Cash and Cash Equivalents At End of Period", 0.2e12),
+        )
+    ])
+    df, notes, _ = normalize_frames([income, balance, cash_flow], years=5, freq="annual")
+    last = df.loc[df.index[-1]]
+    assert str(df.index[-1]) == "2025-12-31"
+    assert last["revenue"] == pytest.approx(1200)          # Net Revenue, not gross Revenue
+    assert last["net_income"] == pytest.approx(120)        # parent-company share
+    assert last["sga"] == pytest.approx(96)                # (30 + 50) * 1.2, positive
+    assert last["cash"] == pytest.approx(200)              # balance sheet, not CF beginning cash
+    assert last["current_assets"] == pytest.approx(900)
+    assert "_selling" not in df.columns
+
+
+def test_vnstock5_quarter_periods():
+    q = _long([("2025-Q3", "Net Revenue", 1e12), ("2025-Q4", "Net Revenue", 2e12),
+               ("2025-Q3", "Total Assets", 5e12), ("2025-Q4", "Total Assets", 5e12)])
+    df, _, _ = normalize_frames([q], years=2, freq="quarterly")
+    assert [str(d) for d in df.index] == ["2025-09-30", "2025-12-31"]
+
+
 def test_missing_vnstock_explains_why(monkeypatch):
     import builtins
 

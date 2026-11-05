@@ -6,14 +6,22 @@ names, and ``fetch`` records which source column fed each canonical item in
 ``Statements.notes``. **Verify the mapping on the first real run**; adjust
 ``COLUMN_PATTERNS`` if a line is missed.
 
-Install: ``pip install vnstock`` (or ``vnstock3`` for the older 3.x line).
-As of 2026-11-04 ``vnstock`` returned 404 on PyPI from our build machine while
-``vnstock3`` 3.2.1 was available; check the project's README for the current
-install route.
+Install (as of 2026-11-04): ``vnstock`` and its dependency ``vnai`` are gone
+from PyPI, so ``vnstock3`` no longer resolves. The vendor ships vnstock 5 from
+its own index::
+
+    pip install --extra-index-url https://vnstocks.com/api/packages vnstock
+
+vnstock 5 dropped the ``Vnstock()`` class (use ``Fundamental().equity(sym)``)
+and gates financial statements behind an account: call
+``vnstock.login(api_key)`` once, or set ``VNSTOCK_API_KEY``. Key from
+https://vnstocks.com/account#api-key. The 3.x/4.x ``Vnstock()`` API is still
+used as a fallback when present.
 """
 
 from __future__ import annotations
 
+import os
 import re
 from datetime import date, datetime, timezone
 
@@ -29,18 +37,21 @@ COLUMN_PATTERNS: dict[str, list[str]] = {
     "cogs": [r"^cost of (goods sold|sales)"],
     "gross_profit": [r"^gross profit"],
     "sga": [r"general (&|and) admin"],
+    "_selling": [r"^selling expenses?$"],  # added into sga, then dropped (VAS reports them separately)
     "operating_income": [r"^operating profit", r"^net operating profit"],
     "interest_expense": [r"^interest expenses?$", r"of which.*interest expense"],
     "pretax_income": [r"^profit before tax", r"accounting profit before tax"],
-    "net_income": [r"attributable to parent", r"^net profit for the year", r"^net profit after tax", r"^net profit"],
+    "net_income": [r"attributable to parent", r"for shareholders of (the )?parent", r"^net profit for the year",
+                   r"^net profit after tax", r"^net profit"],
     # balance sheet
     "total_assets": [r"^total assets", r"^total resources"],
-    "current_assets": [r"^current assets", r"^short-term assets"],
-    "cash": [r"^cash and cash equivalents"],
-    "receivables": [r"^(short-term )?accounts receivable", r"^short-term receivables"],
+    "current_assets": [r"^current assets", r"^short[- ]term assets"],
+    # anchored so the cash-flow lines "... at beginning/end of period" don't overwrite balance-sheet cash
+    "cash": [r"^cash and cash equivalents$", r"^cash and precious metals$"],  # latter: vnstock 5 / VCI label
+    "receivables": [r"^(short[- ]term )?accounts receivable", r"^short[- ]term receivables"],
     "inventory": [r"^(net )?inventor(y|ies)"],
     "total_liabilities": [r"^liabilities \(bn", r"^total liabilities", r"^liabilities$"],
-    "current_liabilities": [r"^current liabilities", r"^short-term liabilities"],
+    "current_liabilities": [r"^current liabilities", r"^short[- ]term liabilities"],
     "accounts_payable": [r"^(short-term )?(trade )?accounts payable", r"^short-term trade payables"],
     "short_term_debt": [r"^short-term borrowings"],
     "long_term_debt": [r"^long-term borrowings"],
@@ -80,6 +91,26 @@ def map_columns(df: pd.DataFrame) -> tuple[dict[str, str], list[str]]:
     return mapping, notes
 
 
+def long_to_wide(df: pd.DataFrame) -> pd.DataFrame:
+    """vnstock 5 returns statements long (``period, id, name, ..., value``; period ``"2025"``
+    or ``"2025-Q3"``). Pivot to the 3.x/4.x wide shape: one row per period, one column per
+    line-item name, plus ``yearReport`` / ``lengthReport``. Wide frames pass through unchanged."""
+    if not {"period", "name", "value"} <= set(df.columns):
+        return df
+    d = df
+    if "off_balance" in d.columns:
+        d = d[~d["off_balance"].fillna(False).astype(bool)]
+    d = d.assign(period=d["period"].astype(str), name=d["name"].astype(str))
+    wide = d.pivot_table(index="period", columns="name", values="value", aggfunc="first", observed=True)
+    wide.columns.name = None
+    parts = wide.index.to_series().str.extract(r"^(\d{4})(?:-Q([1-4]))?$")
+    wide = wide[parts[0].notna().values]
+    parts = parts[parts[0].notna()]
+    wide.insert(0, "yearReport", parts[0].astype(int).values)
+    wide.insert(1, "lengthReport", parts[1].fillna(5).astype(int).values)  # 5 = annual, as in vnstock 3.x
+    return wide.reset_index(drop=True)
+
+
 def normalize_frames(frames: list[pd.DataFrame], years: int, freq: str) -> tuple[pd.DataFrame, list[str], Sector]:
     """Merge income/balance/cash-flow frames from vnstock into canonical columns (VND bn)."""
     merged: dict[date, dict[str, float]] = {}
@@ -88,6 +119,7 @@ def normalize_frames(frames: list[pd.DataFrame], years: int, freq: str) -> tuple
     for df in frames:
         if df is None or df.empty:
             continue
+        df = long_to_wide(df)
         if any(h in _norm(c) for c in df.columns for h in BANK_HINT_COLUMNS):
             sector = Sector.BANK
         year_col = next((c for c in df.columns if _norm(c) in ("yearreport", "year")), None)
@@ -126,6 +158,12 @@ def normalize_frames(frames: list[pd.DataFrame], years: int, freq: str) -> tuple
         out["gross_profit"] = out["revenue"] - out["cogs"].abs()
     if "cogs" in out:
         out["cogs"] = out["cogs"].abs()
+    if "sga" in out:  # vnstock 5 signs expenses negative; canonical sga is a positive cost
+        out["sga"] = out["sga"].abs()
+        if "_selling" in out:
+            out["sga"] = out["sga"] + out["_selling"].abs().fillna(0)
+            notes.append("sga = general & admin + selling expenses")
+    out = out.drop(columns=["_selling"], errors="ignore")
     return out, notes, sector
 
 
@@ -135,6 +173,19 @@ class VnstockProvider(StatementProvider):
 
     def __init__(self, source: str = "VCI"):
         self.source = source
+        self._fundamental = None  # vnstock >= 5
+        self._client = None       # vnstock 3.x / 4.x
+        try:
+            from vnstock import Fundamental  # type: ignore  # vnstock 5
+        except Exception:
+            Fundamental = None
+        if Fundamental is not None:
+            try:
+                self._fundamental = Fundamental()
+            except Exception as exc:
+                raise ProviderError(f"vnstock failed to start: {type(exc).__name__}: {exc}") from exc
+            self._login_from_env()
+            return
         import_errors = []
         Vnstock = None
         for module in ("vnstock", "vnstock3"):
@@ -153,17 +204,43 @@ class VnstockProvider(StatementProvider):
         except Exception as exc:
             raise ProviderError(f"vnstock failed to start: {type(exc).__name__}: {exc}") from exc
 
+    @staticmethod
+    def _login_from_env() -> None:
+        """vnstock 5 gates statements behind an account; log in from VNSTOCK_API_KEY if set."""
+        key = os.getenv("VNSTOCK_API_KEY")
+        if not key:
+            return
+        try:
+            import vnstock  # type: ignore
+            try:
+                authenticated = bool(vnstock.status().get("authenticated"))
+            except Exception:  # status() raises AuthError until login() has registered the device
+                authenticated = False
+            if not authenticated:
+                vnstock.login(key)
+        except Exception as exc:
+            raise ProviderError(f"vnstock login with VNSTOCK_API_KEY failed: {type(exc).__name__}: {exc}") from exc
+
     def fetch(self, ticker: str, years: int, freq: str = "annual") -> Statements:
         period = "year" if freq == "annual" else "quarter"
         try:
-            stock = self._client.stock(symbol=ticker.upper(), source=self.source)
-            frames = [
-                stock.finance.income_statement(period=period, lang="en"),
-                stock.finance.balance_sheet(period=period, lang="en"),
-                stock.finance.cash_flow(period=period, lang="en"),
-            ]
+            if self._fundamental is not None:
+                eq = self._fundamental.equity(ticker.upper())
+                kw = dict(period=period, lang="en", source=self.source.lower())
+                frames = [eq.income_statement(**kw), eq.balance_sheet(**kw), eq.cash_flow(**kw)]
+            else:
+                stock = self._client.stock(symbol=ticker.upper(), source=self.source)
+                frames = [
+                    stock.finance.income_statement(period=period, lang="en"),
+                    stock.finance.balance_sheet(period=period, lang="en"),
+                    stock.finance.cash_flow(period=period, lang="en"),
+                ]
         except Exception as exc:
-            raise ProviderError(f"vnstock ({self.source}) failed for {ticker}: {exc}") from exc
+            msg = f"{type(exc).__name__}: {exc}"
+            if type(exc).__name__ == "EntitlementError":
+                msg = ("this vnstock account tier cannot read financial statements; set "
+                       "VNSTOCK_API_KEY (key from https://vnstocks.com/account#api-key). " + msg)
+            raise ProviderError(f"vnstock ({self.source}) failed for {ticker}: {msg}") from exc
         df, notes, sector = normalize_frames(frames, years, freq)
         if df.empty:
             raise ProviderError(f"vnstock returned no statements for {ticker}")
