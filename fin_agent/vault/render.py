@@ -13,6 +13,8 @@ from datetime import date
 
 import yaml
 
+from fin_agent.llm.usage import fmt_tokens, one_line, summarize
+
 COMPANY_ROOT = "Intelligence/Investment_Analysis/Company_Analysis"
 QA_ROOT = "Intelligence/Investment_Analysis/Analyst_QA"
 PROJECT_ROOT = "Projects/FinAnalystAgent"
@@ -87,7 +89,7 @@ def render_report(state: dict, run_id: str, day: str | None = None) -> str:
         lines += ["", f"> Not assessed: {', '.join(rec['not_assessed'])}"]
     lines += ["", "## Method", f"- Skills used: {', '.join(skill_sources) or 'none'}",
               f"- Guardrail events: {len(state.get('guardrail_log', []))} (see run log)",
-              f"- LLM calls: {state.get('llm_calls', 0)}", "", f"*{rec.get('disclaimer', '')}*", ""]
+              f"- LLM usage: {one_line(summarize(state.get('llm_usage')))}", "", f"*{rec.get('disclaimer', '')}*", ""]
     return fm + "\n".join(lines)
 
 
@@ -141,6 +143,21 @@ def render_run_log(state: dict, run_id: str, day: str | None = None, review: dic
     lines = [f"# Run {run_id}", "", f"**Request:** {state.get('user_input', '')}", "",
              "```yaml", yaml.safe_dump(req, allow_unicode=True, sort_keys=False).strip(), "```", "",
              f"LLM calls: {state.get('llm_calls', 0)} · critic retries: {state.get('retries', 0)}", ""]
+    rows = state.get("llm_usage") or []
+    s = summarize(rows)
+    lines += ["## Token usage", f"**Total:** {one_line(s)}", ""]
+    if rows:
+        lines += ["| node | label | model | in | out | cache write | cache read | cost | ms |",
+                  "|---|---|---|---|---|---|---|---|---|"]
+        for r in rows:
+            cost = f"${r['cost_usd']:.4f}" if r.get("cost_usd") is not None else "n/a"
+            lines.append(f"| {r.get('node')}{'' if r.get('ok', True) else ' ✗'} | {r.get('label') or ''} | {r.get('model') or ''} "
+                         f"| {fmt_tokens(r['input_tokens'])} | {fmt_tokens(r['output_tokens'])} "
+                         f"| {fmt_tokens(r['cache_creation_input_tokens'])} | {fmt_tokens(r['cache_read_input_tokens'])} "
+                         f"| {cost} | {r.get('duration_ms') or ''} |")
+        lines.append("")
+        if "sdk_estimate" in s["cost_sources"]:
+            lines += ["*Cost is the Claude Agent SDK's API-equivalent estimate; on a subscription it counts against plan limits, not billed.*", ""]
     if review:
         lines += ["## Human review", f"- action: {review.get('action')}", f"- feedback: {review.get('feedback') or '(none)'}", ""]
     lines += ["## Guardrail log", "| layer | check | action | detail |", "|---|---|---|---|"]

@@ -22,7 +22,11 @@ class LLMResult:
 
 
 class LLMError(Exception):
-    pass
+    """``usage`` carries tokens already spent when the call ran but its output was unusable."""
+
+    def __init__(self, *args: Any, usage: dict | None = None):
+        super().__init__(*args)
+        self.usage = usage
 
 
 class LLMProvider(ABC):

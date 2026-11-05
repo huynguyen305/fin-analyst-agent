@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fin_agent.agent.graph import build_graph  # noqa: E402
 from fin_agent.config import load_env  # noqa: E402
 from fin_agent.llm.providers import get_provider  # noqa: E402
+from fin_agent.llm.usage import fmt_cost, fmt_tokens, one_line, summarize  # noqa: E402
 
 load_env()
 st.set_page_config(page_title="Fin Analyst Agent", page_icon="📊", layout="wide")
@@ -54,6 +55,12 @@ with st.sidebar:
     st.caption(f"Vault: `{os.getenv('VAULT_PATH') or 'not set'}`")
     if os.getenv("FIN_AGENT_FIXTURES"):
         st.warning("Offline fixtures are on (FIN_AGENT_FIXTURES): data is synthetic.")
+    session_rows = [r for _, kind, p in ss.messages if kind == "state" for r in (p.get("llm_usage") or [])]
+    if session_rows:
+        tot = summarize(session_rows)
+        st.divider()
+        st.markdown("**Session usage**")
+        st.caption(f"{fmt_tokens(tot['total_tokens'])} tokens · {fmt_cost(tot)} · {tot['calls']} LLM calls")
     st.divider()
     st.markdown("**Try**\n- `Phân tích HPG 5 năm, toàn diện`\n- `Quick view of VCB`\n- `Why is FPT's DSO rising?`")
     if st.button("New conversation"):
@@ -121,10 +128,29 @@ def render_result(state: dict) -> None:
         ds = next(iter(state.get("datasets", {}).values()), {})
         if ds:
             st.markdown(f"**Data source:** `{ds['meta']['source']}` · fetched {ds['meta']['fetched_at']}")
-        st.markdown(f"**LLM calls:** {state.get('llm_calls', 0)} · **critic retries:** {state.get('retries', 0)}")
+        st.markdown(f"**LLM calls:** {state.get('llm_calls', 0)} · **critic retries:** {state.get('retries', 0)} "
+                    "· token usage below")
         if state.get("guardrail_log"):
             st.dataframe(pd.DataFrame(state["guardrail_log"]), use_container_width=True, hide_index=True)
     st.caption(rec.get("disclaimer", ""))
+
+
+def render_usage(state: dict) -> None:
+    """Token usage and cost for this run (every run, including Q&A and failed ones)."""
+    rows = state.get("llm_usage") or []
+    s = summarize(rows)
+    with st.expander(f"🔢 Usage: {fmt_tokens(s['total_tokens'])} tokens · {fmt_cost(s)} · {s['calls']} LLM calls", expanded=False):
+        st.markdown(one_line(s) + (f"  \nModels: {', '.join(s['models'])}" if s["models"] else ""))
+        if rows:
+            df = pd.DataFrame(rows)[["node", "label", "model", "input_tokens", "output_tokens",
+                                     "cache_creation_input_tokens", "cache_read_input_tokens", "total_tokens",
+                                     "cost_usd", "duration_ms", "ok"]]
+            st.dataframe(df, use_container_width=True, hide_index=True)
+        if s["failed_calls"]:
+            st.caption(f"{s['failed_calls']} call(s) failed after spending tokens; they are included above.")
+        if "sdk_estimate" in s["cost_sources"]:
+            st.caption("Cost is the Claude Agent SDK's API-equivalent estimate. On a Claude subscription it is not billed; "
+                       "usage counts against your plan limits.")
 
 
 def render_sync(state: dict) -> None:
@@ -178,6 +204,7 @@ for role, kind, payload in ss.messages:
         else:
             render_result(payload)
             render_sync(payload)
+            render_usage(payload)
 
 pending = ss.pending
 if pending and pending.get("type") == "review":

@@ -11,6 +11,7 @@ from fin_agent.agent.prompts import (
 from fin_agent.agent.state import DEPTH_LENSES, LLM_CALL_BUDGET, MAX_CRITIC_RETRIES, AgentState
 from fin_agent.guards.guards import ensure_disclaimer, guard_answer, guard_claim, guard_recommendation
 from fin_agent.llm.base import LLMError, LLMProvider
+from fin_agent.llm.usage import usage_entry
 
 NEEDS_MARKET_DATA = {"valuation"}  # until a price provider exists
 
@@ -55,12 +56,15 @@ def make_lens(llm: LLMProvider):
             skill=payload["skills"].get(lens, {}).get("text", ""), metrics=_metrics_block(payload["metrics"], lens),
             feedback=feedback,
         )
+        label = lens + (" (retry)" if payload.get("feedback") else "")
         try:
             res = llm.complete(_system(req), prompt, LENS_SCHEMA)
             data = res.data if isinstance(res.data, dict) else {"summary": "", "findings": []}
+            usage = usage_entry(res.usage, "lens", label)
         except LLMError as exc:
             data = {"summary": f"Lens failed: {exc}", "findings": [], "error": True}
-        return {"findings": {lens: data}, "llm_calls": 1}
+            usage = usage_entry(exc.usage, "lens", label, ok=False)
+        return {"findings": {lens: data}, "llm_calls": 1, "llm_usage": [usage]}
 
     return lens_node
 
@@ -133,12 +137,16 @@ def make_recommender(llm: LLMProvider):
             skill=state["skills"].get("recommendation", {}).get("text", ""),
             findings="\n".join(lines) or "(none)", not_assessed=", ".join(not_assessed) or "none",
         )
-        log, calls, rec, feedback = [], 0, {}, ""
+        log, calls, rec, feedback, usage = [], 0, {}, "", []
         for attempt in range(2):  # one re-ask if guards fail
+            label = "re-ask" if attempt else None
             try:
-                rec = llm.complete(_system(req), prompt + feedback, RECOMMEND_SCHEMA).data or {}
+                res = llm.complete(_system(req), prompt + feedback, RECOMMEND_SCHEMA)
             except LLMError as exc:
-                return {"error": f"Recommender failed: {exc}", "llm_calls": calls + 1}
+                usage.append(usage_entry(exc.usage, "recommend", label, ok=False))
+                return {"error": f"Recommender failed: {exc}", "llm_calls": calls + 1, "llm_usage": usage}
+            rec = res.data or {}
+            usage.append(usage_entry(res.usage, "recommend", label))
             calls += 1
             problems = guard_recommendation(rec)
             if not problems:
@@ -154,7 +162,7 @@ def make_recommender(llm: LLMProvider):
         lang = req.get("language", "en")
         rec["disclaimer"] = ensure_disclaimer(rec.get("disclaimer", ""), lang).strip()
         rec["not_assessed"] = not_assessed
-        return {"recommendation": rec, "guardrail_log": log, "llm_calls": calls}
+        return {"recommendation": rec, "guardrail_log": log, "llm_calls": calls, "llm_usage": usage}
 
     return recommend
 
@@ -169,13 +177,17 @@ def make_qa(llm: LLMProvider):
             skill=state["skills"].get("qa", {}).get("text", ""), metrics=_metrics_block(state["metrics"]),
         )
         by_id = {m["id"]: m for m in state["metrics"]}
-        log, calls, ans = [], 0, {}
+        log, calls, ans, usage = [], 0, {}, []
         feedback = ""
         for attempt in range(MAX_CRITIC_RETRIES + 1):
+            label = f"re-ask {attempt}" if attempt else None
             try:
-                ans = llm.complete(_system(req), prompt + feedback, QA_SCHEMA).data or {}
+                res = llm.complete(_system(req), prompt + feedback, QA_SCHEMA)
             except LLMError as exc:
-                return {"error": f"Q&A failed: {exc}", "llm_calls": calls + 1}
+                usage.append(usage_entry(exc.usage, "qa", label, ok=False))
+                return {"error": f"Q&A failed: {exc}", "llm_calls": calls + 1, "llm_usage": usage}
+            ans = res.data or {}
+            usage.append(usage_entry(res.usage, "qa", label))
             calls += 1
             problems = guard_answer(ans, by_id)
             if not problems:
@@ -185,7 +197,7 @@ def make_qa(llm: LLMProvider):
         else:
             ans["low_confidence"] = True
         ans["disclaimer"] = ensure_disclaimer("", req.get("language", "en")).strip()
-        return {"answer": ans, "guardrail_log": log, "llm_calls": calls}
+        return {"answer": ans, "guardrail_log": log, "llm_calls": calls, "llm_usage": usage}
 
     return qa
 
