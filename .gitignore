@@ -8,3 +8,4 @@ build/
 dist/
 .fin_agent_cache/
 probe_output/
+logs/

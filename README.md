@@ -22,14 +22,20 @@ git clone https://github.com/huynguyen305/fin-analyst-agent.git
 cd fin-analyst-agent
 python -m venv .venv
 .venv\Scripts\pip install -e ".[dev,ui]"
-copy .env.example .env      # then edit VAULT_PATH, SEC_USER_AGENT
+# HOSE/HNX/UPCoM data: vnstock 5 is only on the vendor's index (vnstock/vnai left PyPI in 2026-11)
+.venv\Scripts\pip install --extra-index-url https://vnstocks.com/api/packages vnstock
+copy .env.example .env      # then edit VAULT_PATH, SEC_USER_AGENT, VNSTOCK_API_KEY
 
 # Uses your Claude subscription through the Claude Code CLI login (run `claude` once to sign in)
 .venv\Scripts\python -m fin_agent "Phân tích HPG 5 năm, toàn diện"
 .venv\Scripts\python -m fin_agent "Why are FPT's receivables growing faster than revenue?"
 
-# Local UI (http://localhost:8501)
+# Local UI (http://localhost:8501), foreground
 .venv\Scripts\streamlit run app/ui.py
+# ...or as a hidden background server that outlives the terminal (logs in logs/), and to stop it
+powershell -ExecutionPolicy Bypass -File scripts\start_ui.ps1     # add -NoBrowser to skip opening a tab
+powershell -ExecutionPolicy Bypass -File scripts\stop_ui.ps1
+# Shortcuts: point a Desktop shortcut at start_ui.ps1; put one with -NoBrowser in shell:startup to run it at logon
 
 # Review the result, then write it to the vault as a branch + PR (needs VAULT_PATH; `gh` CLI opens the PR, else you get a compare link)
 .venv\Scripts\python -m fin_agent "Analyze FPT, 360" --sync
