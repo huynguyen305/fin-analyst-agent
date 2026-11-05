@@ -12,6 +12,7 @@ from langgraph.types import Command
 from fin_agent.agent.graph import build_graph
 from fin_agent.config import load_env
 from fin_agent.llm.providers import get_provider
+from fin_agent.llm.usage import one_line, summarize
 
 
 def render(out: dict) -> str:
@@ -40,8 +41,12 @@ def render(out: dict) -> str:
         if rec.get(k):
             lines.append(f"**{k.replace('_', ' ').title()}:** " + "; ".join(rec[k]))
     lines += ["", rec.get("disclaimer", "")]
-    lines.append(f"\nLLM calls: {out.get('llm_calls', 0)} · guardrail events: {len(out.get('guardrail_log', []))}")
+    lines.append(f"\nGuardrail events: {len(out.get('guardrail_log', []))}")
     return "\n".join(lines)
+
+
+def usage_line(out: dict) -> str:
+    return "LLM usage: " + one_line(summarize(out.get("llm_usage")))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -66,6 +71,8 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(out, ensure_ascii=False, indent=1, default=str))
     elif not args.sync:
         print(render(out))
+    if not args.json:
+        print("\n" + usage_line(out), file=sys.stderr)  # every run, including errors; stderr keeps stdout clean
     vs = out.get("vault_sync")
     if vs:
         print("\nVault:", vs.get("error") or f"branch {vs['branch']} ({len(vs['files'])} files) "

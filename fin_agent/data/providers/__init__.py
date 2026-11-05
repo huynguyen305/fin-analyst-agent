@@ -8,12 +8,15 @@ from fin_agent.data.providers.base import ProviderError, StatementProvider
 from fin_agent.data.schema import Statements
 
 
-def build_providers(market: str) -> list[StatementProvider]:
+def build_providers(market: str, setup_errors: list[str] | None = None) -> list[StatementProvider]:
     """Providers to try for a market, in priority order (ADR-007).
 
     ``FIN_AGENT_FIXTURES`` set to a directory forces offline fixtures first,
-    which is how tests and evals run without network access.
+    which is how tests and evals run without network access. Providers that
+    cannot start (library missing, bad config) are skipped and the reason is
+    appended to ``setup_errors`` so the user sees why.
     """
+    setup_errors = setup_errors if setup_errors is not None else []
     providers: list[StatementProvider] = []
     fixtures = os.getenv("FIN_AGENT_FIXTURES")
     if fixtures:
@@ -24,25 +27,25 @@ def build_providers(market: str) -> list[StatementProvider]:
         try:
             from fin_agent.data.providers.vnstock_provider import VnstockProvider
             providers.append(VnstockProvider(os.getenv("VNSTOCK_SOURCE", "VCI")))
-        except ProviderError:
-            pass
+        except ProviderError as exc:
+            setup_errors.append(f"vnstock not available: {exc}")
     if market == "US":
         try:
             from fin_agent.data.providers.edgar import EdgarProvider
             providers.append(EdgarProvider())
-        except ProviderError:
-            pass
+        except ProviderError as exc:
+            setup_errors.append(f"sec_edgar not available: {exc}")
     return providers
 
 
 def fetch_statements(ticker: str, market: str, years: int, freq: str = "annual") -> Statements:
-    errors = []
-    for p in build_providers(market):
+    errors: list[str] = []
+    for p in build_providers(market, errors):
         try:
             return p.fetch(ticker, years, freq)
         except ProviderError as exc:
             errors.append(f"{p.name}: {exc}")
-    raise ProviderError(f"No provider could supply {ticker} ({market}). Tried: " + (" | ".join(errors) or "none configured"))
+    raise ProviderError(f"No provider could supply {ticker} ({market}). Tried: " + (" | ".join(errors) or "no provider for this market"))
 
 
 __all__ = ["ProviderError", "StatementProvider", "build_providers", "fetch_statements"]

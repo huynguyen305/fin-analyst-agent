@@ -47,6 +47,7 @@ class AgentState(TypedDict, total=False):
     answer: dict
     guardrail_log: Annotated[list[dict], operator.add]
     llm_calls: Annotated[int, operator.add]
+    llm_usage: Annotated[list[dict], operator.add]  # one row per LLM call (fin_agent.llm.usage.usage_entry)
     error: str
     sync: bool  # set by the caller: run the review checkpoint and vault sync
     run_id: str

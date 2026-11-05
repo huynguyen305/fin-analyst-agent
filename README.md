@@ -21,15 +21,21 @@ The design, decisions and roadmap live in the Obsidian vault (`MyObsidian/Projec
 git clone https://github.com/huynguyen305/fin-analyst-agent.git
 cd fin-analyst-agent
 python -m venv .venv
-.venv\Scripts\pip install -e ".[dev,vn,ui]"
-copy .env.example .env      # then edit VAULT_PATH, SEC_USER_AGENT
+.venv\Scripts\pip install -e ".[dev,ui]"
+# HOSE/HNX/UPCoM data: vnstock 5 is only on the vendor's index (vnstock/vnai left PyPI in 2026-11)
+.venv\Scripts\pip install --extra-index-url https://vnstocks.com/api/packages vnstock
+copy .env.example .env      # then edit VAULT_PATH, SEC_USER_AGENT, VNSTOCK_API_KEY
 
 # Uses your Claude subscription through the Claude Code CLI login (run `claude` once to sign in)
 .venv\Scripts\python -m fin_agent "Phân tích HPG 5 năm, toàn diện"
 .venv\Scripts\python -m fin_agent "Why are FPT's receivables growing faster than revenue?"
 
-# Local UI (http://localhost:8501)
+# Local UI (http://localhost:8501), foreground
 .venv\Scripts\streamlit run app/ui.py
+# ...or as a hidden background server that outlives the terminal (logs in logs/), and to stop it
+powershell -ExecutionPolicy Bypass -File scripts\start_ui.ps1     # add -NoBrowser to skip opening a tab
+powershell -ExecutionPolicy Bypass -File scripts\stop_ui.ps1
+# Shortcuts: point a Desktop shortcut at start_ui.ps1; put one with -NoBrowser in shell:startup to run it at logon
 
 # Review the result, then write it to the vault as a branch + PR (needs VAULT_PATH; `gh` CLI opens the PR, else you get a compare link)
 .venv\Scripts\python -m fin_agent "Analyze FPT, 360" --sync
@@ -106,7 +112,7 @@ tests/         offline tests on synthetic fixtures (DEMO, DEMOBANK: invented num
 
 ## Known limits and things to verify
 
-- **vnstock install route.** On 2026-11-04 `pip install vnstock` returned *not found* from the build machine, while `vnstock3` 3.2.1 installed. The provider tries both. Column mapping uses regex patterns: check the `notes` of the first real run (`--json`) and adjust `COLUMN_PATTERNS` if a line item is missed.
+- **vnstock is quarantined on PyPI.** As of 2026-11-04 PyPI marks `vnstock` as *quarantined* (PyPI does this while a malware or security report is investigated), and `vnstock3` cannot install because its dependency `vnai` was removed. Do not install either from another source until the reason is clear. The HOSE provider is being replaced by a dependency-free one; run `python scripts/probe_vn_sources.py FPT` to see which public sources answer from your network.
 - **Not tested against live market data yet.** The build machine had no access to VN broker APIs or SEC EDGAR. Live runs happen on your PC, and the step 4 pilot will verify them.
 - **Claude subscription.** Works through the Claude Agent SDK and your local Claude Code login (personal, local use, within your plan's rate limits). Large eval sweeps may need `anthropic_api`.
 - **Banks.** NPL and CAR usually sit in the notes, not the main statements, so they show as missing unless a source provides them.
