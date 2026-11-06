@@ -11,6 +11,7 @@ dependencies = [
   "pyyaml>=6",
   "claude-agent-sdk>=0.2",
   "guardrails-ai>=0.11",
+  "httpx>=0.27",  # TypeSafe Jev client (fin_agent.evals)
 ]
 
 [project.optional-dependencies]

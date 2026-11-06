@@ -13,7 +13,9 @@ from fin_agent.guards.guards import ensure_disclaimer, guard_answer, guard_claim
 from fin_agent.llm.base import LLMError, LLMProvider
 from fin_agent.llm.usage import usage_entry
 
-NEEDS_MARKET_DATA = {"valuation"}  # until a price provider exists
+# valuation multiples read against quality and growth (P/B vs ROE, P/E vs earnings growth)
+VALUATION_CONTEXT = {"roe", "roa", "net_income_growth", "revenue_growth", "net_margin", "nii_to_avg_loans"}
+NO_MARKET_DATA = "Not assessed: no market price data for this ticker (price lookup unavailable or failed)."
 
 
 def _system(req: dict) -> str:
@@ -21,7 +23,8 @@ def _system(req: dict) -> str:
 
 
 def _metrics_block(metrics: list[dict], lens: str | None = None) -> str:
-    rows = [m for m in metrics if lens in (None, "risk_governance") or m["lens"] in (lens, "data")]
+    rows = [m for m in metrics if lens in (None, "risk_governance") or m["lens"] in (lens, "data")
+            or (lens == "valuation" and m["name"] in VALUATION_CONTEXT)]
     return "\n".join(f"{m['id']} | {m['display']} | {m['formula']}" for m in rows)
 
 
@@ -46,8 +49,8 @@ def make_lens(llm: LLMProvider):
     def lens_node(payload: dict) -> dict:
         lens, req = payload["lens"], payload["request"]
         meta = next(iter(payload["datasets"].values()))["meta"]
-        if lens in NEEDS_MARKET_DATA:
-            return {"findings": {lens: {"not_assessed": True, "summary": "Not assessed: market price data is not connected yet.", "findings": []}}}
+        if lens == "valuation" and not any(m["lens"] == "valuation" for m in payload["metrics"]):
+            return {"findings": {lens: {"not_assessed": True, "summary": NO_MARKET_DATA, "findings": []}}}
         feedback = ""
         if payload.get("feedback"):
             feedback = "\nYour previous answer failed review. Fix these issues:\n- " + "\n- ".join(payload["feedback"]) + "\n"

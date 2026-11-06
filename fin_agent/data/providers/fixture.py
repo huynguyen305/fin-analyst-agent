@@ -4,7 +4,10 @@ Fixture format::
 
     {"ticker": "DEMO", "market": "HOSE", "currency": "VND", "unit": "bn",
      "sector": "general", "freq": "annual",
-     "periods": {"2021-12-31": {"revenue": 100.0, ...}, ...}}
+     "periods": {"2021-12-31": {"revenue": 100.0, ...}, ...},
+     "market_data": {"price": 25000, "shares_outstanding": 1.2e9, "price_date": "2025-03-31"}}
+
+``market_data`` is optional; without it the valuation lens is not assessed.
 """
 
 from __future__ import annotations
@@ -15,7 +18,7 @@ from pathlib import Path
 import pandas as pd
 
 from fin_agent.data.providers.base import ProviderError, StatementProvider
-from fin_agent.data.schema import Sector, Statements
+from fin_agent.data.schema import MarketData, Sector, Statements
 
 
 class FixtureProvider(StatementProvider):
@@ -39,4 +42,6 @@ class FixtureProvider(StatementProvider):
             sector=Sector(doc.get("sector", "general")), freq=doc.get("freq", "annual"),
             data=df, source=f"fixture:{path.name}", fetched_at=doc.get("fetched_at", "fixture"),
             notes=[doc["note"]] if doc.get("note") else [],
+            market_data=MarketData.from_dict({"source": f"fixture:{path.name}", **doc["market_data"]})
+            if doc.get("market_data") else None,
         )

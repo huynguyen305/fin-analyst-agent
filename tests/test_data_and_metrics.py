@@ -5,7 +5,7 @@ import pytest
 
 from fin_agent.data.providers.edgar import parse_companyfacts
 from fin_agent.data.providers.vnstock_provider import normalize_frames
-from fin_agent.data.schema import DataQualityError, Sector, assert_quality, run_dq_checks
+from fin_agent.data.schema import DataQualityError, Sector, Statements, assert_quality, run_dq_checks
 from fin_agent.metrics.library import compute_metrics, line_item_metrics, trend
 
 
@@ -27,6 +27,21 @@ def test_dq_catches_balance_gap(demo):
 def test_dq_flags_missing_core_lines(demo):
     demo.data = demo.data.drop(columns=["cfo"])
     assert any(i.check == "core_lines" for i in run_dq_checks(demo))
+
+
+def test_vnstock5_bank_summary_maps_and_missing_deposits_only_warns():
+    # vnstock 5 Community tier: summary bank balance sheet, long format, no deposits line
+    rows = {"Total Assets": 2000.0, "Loans to Customers": 1400.0, "Total Liabilities": 1800.0,
+            "Equity": 200.0, "Minority Interest": 0.0}
+    bs = pd.DataFrame([{"period": "2024", "name": k, "value": v} for k, v in rows.items()])
+    inc = pd.DataFrame([{"period": "2024", "name": "Net Interest Income", "value": 55.0},
+                        {"period": "2024", "name": "Profit After Tax for Shareholders of Parent Company", "value": 33.0}])
+    df, _, sector = normalize_frames([inc, bs], years=3, freq="annual")
+    assert sector == Sector.BANK
+    assert df.loc[df.index[0], "equity"] == 200.0 and df.loc[df.index[0], "loans"] == 1400.0
+    st = Statements("VCB", "HOSE", "VND", "bn", sector, "annual", df, "test", "now")
+    issues = assert_quality(st)
+    assert [i.check for i in issues] == ["expected_lines"]
 
 
 def test_general_metrics_hand_computed(demo):
@@ -170,3 +185,56 @@ def test_missing_vnstock_explains_why(monkeypatch):
         fetch_statements("FPT", "HOSE", 3)
     msg = str(e.value)
     assert "vnstock not available" in msg and "pip install vnstock3" in msg and "No module named" in msg
+
+
+# ---------------------------------------------------------------- valuation
+
+def test_valuation_metrics_from_market_data(demo):
+    # DEMO fixture: 30,000 VND x 1.0bn shares = 30,000 VND bn; FY2024 NI 2,320, equity 12,000
+    ms = [m for m in compute_metrics(demo) if m.lens == "valuation"]
+    v = {m.name: m.value for m in ms}
+    assert {m.period for m in ms} == {"2025-03-31"}
+    assert v["market_cap"] == pytest.approx(30000.0)
+    assert v["pe"] == pytest.approx(30000 / 2320)
+    assert v["pb"] == pytest.approx(2.5)
+    assert v["dividend_yield"] == pytest.approx(800 / 30000)
+    assert v["ev_to_ebit"] == pytest.approx((30000 + 3300 + 1700 - 1900) / 3180)
+    assert v["fcf_yield"] == pytest.approx((1500 - 1300) / 30000)
+    price = next(m for m in ms if m.name == "share_price")
+    assert price.display() == "30,000.0 VND"
+
+
+def test_no_valuation_without_market_data(demobank):
+    assert not [m for m in compute_metrics(demobank) if m.lens == "valuation"]
+
+
+def test_pe_skipped_for_losses_and_ttm_needs_four_quarters(demo):
+    demo.data.loc[demo.data.index[-1], "net_income"] = -10.0
+    names = {m.name for m in compute_metrics(demo) if m.lens == "valuation"}
+    assert "pe" not in names and "pb" in names
+    q = demo.last_n(3)
+    q.freq = "quarterly"
+    names = {m.name for m in compute_metrics(q) if m.lens == "valuation"}
+    assert "pe" not in names and "ps" not in names and "pb" in names
+
+
+def test_vnstock_market_data_parsing():
+    from fin_agent.data.providers.vnstock_provider import market_data_from_frames
+    hist = pd.DataFrame({"time": pd.to_datetime(["2026-11-04", "2026-11-05"]), "close": [54.8, 54.2]})
+    ov = pd.DataFrame([{"outstanding_shares": 8355675094, "as_of_date": "2025-12-31T00:00:00"}])
+    md = market_data_from_frames(hist, ov, source="vnstock:VCI")
+    assert md.price == pytest.approx(54200.0)  # quoted in thousands of VND
+    assert md.price_date == "2026-11-05" and md.shares_as_of == "2025-12-31"
+
+
+def test_market_data_failure_is_not_fatal(monkeypatch):
+    from fin_agent.data import providers
+    from fin_agent.data.providers.fixture import FixtureProvider
+
+    def boom(self, ticker):
+        raise providers.ProviderError("price service down")
+
+    monkeypatch.setattr(FixtureProvider, "fetch_market_data", boom)
+    st = providers.fetch_statements("DEMOBANK", "HOSE", 5)
+    assert st.market_data is None
+    assert any("price service down" in n for n in st.notes)

@@ -118,6 +118,10 @@ def render_snapshot(state: dict, day: str | None = None) -> tuple[str, str]:
     body = [f"# {ticker} statements snapshot ({day})", "",
             f"Source: `{ds['meta']['source']}` · unit: {ds['meta']['currency']} {ds['meta']['unit']} · CSV: `{day}_statements.csv`", "",
             "## Normalized statements", head, *rows, "", "## Computed metrics", mhead, *mrows]
+    md = ds["meta"].get("market_data")
+    if md:
+        body += ["", f"Market data: price {md['price']:,.0f} {ds['meta']['currency']} on {md['price_date']} · "
+                     f"{md['shares_outstanding']:,.0f} shares (as of {md.get('shares_as_of') or 'n/a'}) · `{md['source']}`"]
     if notes:
         body += ["", "## Source mapping notes"] + [f"- {n}" for n in notes]
     buf = io.StringIO()

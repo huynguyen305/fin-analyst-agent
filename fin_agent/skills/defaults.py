@@ -37,7 +37,11 @@ DEFAULT_SKILLS: dict[tuple[str, str], str] = {
 - Dividends not covered by free cash flow (cover below 1.0x) are funded by debt or cash reserves.
 - One weak year is noise; flag multi-year patterns.""",
     ("valuation", "all"): """\
-- Valuation needs market prices, which the data layer does not provide yet. Say that valuation was not assessed.""",
+- Multiples use the latest close and the latest fiscal year (or trailing four quarters); state the price date.
+- Read P/B against ROE: a high P/B is only justified by a durably high ROE. Read P/E against earnings growth.
+- Negative or tiny earnings make P/E meaningless (it is then not computed): use P/B or EV/EBIT instead.
+- Compare with the stock's own history or sector peers only if those figures are given; never invent peer multiples.
+- For banks, P/B with ROE is the main lens; EV-based multiples do not apply.""",
     ("risk_governance", "all"): """\
 - From the statements alone, flag: rising leverage, deteriorating cash conversion, margin compression, and growth funded by debt.
 - Governance (related-party deals, ownership, board) needs disclosures that are not in the data: list what should be checked.""",
@@ -45,7 +49,8 @@ DEFAULT_SKILLS: dict[tuple[str, str], str] = {
 - Use one of: Accumulate, Hold, Reduce, Avoid. This is analysis, not licensed advice.
 - Confidence (low / medium / high) depends on data coverage and agreement between lenses.
 - Give bull, base and bear cases, at least three key risks, and what would change the view.
-- Without valuation data, a call is about business quality only: say so explicitly.""",
+- If valuation was not assessed, the call is about business quality only: say so explicitly.
+- If it was, weigh quality against price: a good business at a stretched multiple is not automatically Accumulate.""",
     ("qa", "all"): """\
 - Answer the question directly first, then the supporting figures.
 - If the data cannot answer the question, say what is missing instead of guessing.""",

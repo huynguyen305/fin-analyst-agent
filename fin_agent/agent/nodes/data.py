@@ -6,7 +6,7 @@ import pandas as pd
 
 from fin_agent.agent.state import DEPTH_LENSES, AgentState
 from fin_agent.data.providers import ProviderError, fetch_statements
-from fin_agent.data.schema import DataQualityError, Sector, Statements, assert_quality
+from fin_agent.data.schema import DataQualityError, MarketData, Sector, Statements, assert_quality
 from fin_agent.metrics.library import compute_metrics, line_item_metrics
 from fin_agent.skills.loader import load_skill_packs
 
@@ -14,6 +14,7 @@ from fin_agent.skills.loader import load_skill_packs
 def statements_to_state(st: Statements) -> dict:
     meta = {k: getattr(st, k) for k in ("ticker", "market", "currency", "unit", "freq", "source", "fetched_at", "notes")}
     meta["sector"] = st.sector.value
+    meta["market_data"] = st.market_data.to_dict() if st.market_data else None
     return {"meta": meta, "records": st.to_records()}
 
 
@@ -28,6 +29,7 @@ def statements_from_state(ds: dict) -> Statements:
         ticker=meta["ticker"], market=meta["market"], currency=meta["currency"], unit=meta["unit"],
         sector=Sector(meta["sector"]), freq=meta["freq"], data=df, source=meta["source"],
         fetched_at=meta["fetched_at"], notes=list(meta.get("notes", [])),
+        market_data=MarketData.from_dict(meta.get("market_data")),
     )
 
 

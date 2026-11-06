@@ -23,12 +23,12 @@ from __future__ import annotations
 
 import os
 import re
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pandas as pd
 
 from fin_agent.data.providers.base import ProviderError, StatementProvider
-from fin_agent.data.schema import Sector, Statements
+from fin_agent.data.schema import MarketData, Sector, Statements
 
 # canonical item -> regex patterns tried in order against lower-cased column names
 COLUMN_PATTERNS: dict[str, list[str]] = {
@@ -55,7 +55,7 @@ COLUMN_PATTERNS: dict[str, list[str]] = {
     "accounts_payable": [r"^(short-term )?(trade )?accounts payable", r"^short-term trade payables"],
     "short_term_debt": [r"^short-term borrowings"],
     "long_term_debt": [r"^long-term borrowings"],
-    "equity": [r"^owner'?s'? equity", r"^total equity", r"^equity \(bn"],
+    "equity": [r"^owner'?s'? equity", r"^total equity", r"^equity \(bn", r"^equity$"],  # last: vnstock 5 bank summary
     # cash flow
     "cfo": [r"net cash (inflows/outflows|flows?) from operating"],
     "capex": [r"^purchase of fixed assets", r"purchases? of (fixed|long-term) assets"],
@@ -64,8 +64,10 @@ COLUMN_PATTERNS: dict[str, list[str]] = {
     # banks
     "interest_income": [r"^interest and similar income"],
     "net_interest_income": [r"^net interest income"],
-    "loans": [r"^loans and advances to customers, net", r"^loans and advances to customers"],
-    "deposits": [r"^deposits from customers"],
+    "loans": [r"^loans and advances to customers, net", r"^loans and advances to customers",
+              r"^loans to customers"],  # last: vnstock 5 bank summary
+    # vnstock 5 Community tier ships only a summary bank balance sheet with no deposits line
+    "deposits": [r"^deposits from customers", r"^customer deposits", r"^deposits of customers"],
     "loan_loss_reserve": [r"provision for (credit|loan) losses on loans", r"^less: provision"],
     "provision_expense": [r"^provision for credit losses$", r"^provision expenses? for credit"],
 }
@@ -249,3 +251,49 @@ class VnstockProvider(StatementProvider):
             freq=freq, data=df, source=f"vnstock:{self.source}",
             fetched_at=datetime.now(timezone.utc).isoformat(timespec="seconds"), notes=notes,
         )
+
+    def fetch_market_data(self, ticker: str) -> MarketData | None:
+        """Latest close and shares outstanding from free (Community tier) vnstock 5 endpoints:
+        ``Quote(...).history`` and ``Company(...).overview``. Older vnstock: not wired (None)."""
+        if self._fundamental is None:
+            return None
+        sym = ticker.upper()
+        try:
+            from vnstock import Company, Quote  # type: ignore
+            end = date.today()
+            hist = Quote(source=self.source, symbol=sym).history(
+                start=(end - timedelta(days=PRICE_LOOKBACK_DAYS)).isoformat(), end=end.isoformat())
+            overview = Company(symbol=sym).overview()
+        except Exception as exc:
+            raise ProviderError(f"vnstock price lookup failed for {sym}: {type(exc).__name__}: {exc}") from exc
+        return market_data_from_frames(hist, overview, source=f"vnstock:{self.source}")
+
+
+PRICE_LOOKBACK_DAYS = 14  # covers Tet and other multi-day market closures
+
+
+def price_to_vnd(close: float) -> float:
+    """vnstock quotes HOSE/HNX/UPCoM prices in thousands of VND (54.2 = 54,200 VND).
+    The lowest board lot trades well above 1,000 VND, so a value under 1,000 is in thousands."""
+    return close * 1000 if close < 1000 else close
+
+
+def market_data_from_frames(hist: pd.DataFrame, overview: pd.DataFrame, source: str) -> MarketData | None:
+    """Build a MarketData from a vnstock price history frame and a company overview frame."""
+    if hist is None or hist.empty or "close" not in hist.columns:
+        raise ProviderError("no recent price history")
+    if overview is None or overview.empty or "outstanding_shares" not in overview.columns:
+        raise ProviderError("company overview has no outstanding_shares")
+    hist = hist.dropna(subset=["close"])
+    if hist.empty:
+        raise ProviderError("no recent closing price")
+    last = hist.iloc[-1]
+    shares = pd.to_numeric(overview["outstanding_shares"].iloc[0], errors="coerce")
+    if pd.isna(shares) or shares <= 0:
+        raise ProviderError("outstanding_shares missing or zero")
+    price_date = pd.Timestamp(last["time"]).date().isoformat() if "time" in hist.columns else ""
+    as_of = overview["as_of_date"].iloc[0] if "as_of_date" in overview.columns else ""
+    return MarketData(
+        price=price_to_vnd(float(last["close"])), shares_outstanding=float(shares), price_date=price_date,
+        source=source, shares_as_of=str(pd.Timestamp(as_of).date()) if as_of else "",
+    )

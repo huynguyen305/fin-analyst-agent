@@ -30,9 +30,20 @@ def test_full_analysis_end_to_end():
     assert out["skills"]["profitability"]["sources"] == ["builtin:profitability"]
 
 
-def test_valuation_marked_not_assessed_at_standard_depth():
+def test_valuation_assessed_when_market_data_present():
     app = build_graph(FakeProvider(scripted_handler()))
     out = app.invoke({"user_input": "Analyze DEMO"}, {"configurable": {"thread_id": "std"}})
+    assert out.get("error") is None, out.get("error")
+    val = out["findings"]["valuation"]
+    assert not val.get("not_assessed")
+    assert val["findings"]
+    assert "valuation" not in (out["recommendation"].get("not_assessed") or [])
+    assert out["datasets"]["DEMO"]["meta"]["market_data"]["price"] == 30000.0
+
+
+def test_valuation_not_assessed_without_market_data():
+    app = build_graph(FakeProvider(scripted_handler(tickers=["DEMOBANK"])))
+    out = app.invoke({"user_input": "Analyze the demo bank"}, {"configurable": {"thread_id": "std-bank"}})
     assert out["findings"]["valuation"]["not_assessed"] is True
     assert "valuation" in out["recommendation"]["not_assessed"]
 

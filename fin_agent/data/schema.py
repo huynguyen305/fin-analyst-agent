@@ -41,10 +41,39 @@ ALL_ITEMS = INCOME_ITEMS + BALANCE_ITEMS + CASHFLOW_ITEMS + BANK_ITEMS
 
 CORE_ITEMS = {
     Sector.GENERAL: ["revenue", "net_income", "total_assets", "total_liabilities", "equity", "cfo"],
-    Sector.BANK: ["net_interest_income", "net_income", "total_assets", "total_liabilities", "equity", "loans", "deposits"],
+    Sector.BANK: ["net_interest_income", "net_income", "total_assets", "total_liabilities", "equity", "loans"],
     Sector.INSURANCE: ["revenue", "net_income", "total_assets", "equity"],
     Sector.SECURITIES: ["revenue", "net_income", "total_assets", "equity"],
 }
+
+# Expected but not run-blocking: missing ones are reported as warnings and the metrics that
+# need them (e.g. LDR, deposit growth) come out n/a. vnstock 5's free tier omits bank deposits.
+EXPECTED_ITEMS = {
+    Sector.BANK: ["deposits"],
+}
+
+
+@dataclass
+class MarketData:
+    """Market snapshot used by the valuation lens.
+
+    ``price`` is per share in full currency units (VND, USD), never thousands.
+    ``shares_outstanding`` is a share count. Both may come from different dates;
+    ``price_date`` is the trading day of the price, ``shares_as_of`` the count's date.
+    """
+
+    price: float
+    shares_outstanding: float
+    price_date: str  # ISO date
+    source: str
+    shares_as_of: str = ""
+
+    def to_dict(self) -> dict:
+        return dict(self.__dict__)
+
+    @classmethod
+    def from_dict(cls, d: dict | None) -> "MarketData | None":
+        return cls(**d) if d else None
 
 
 @dataclass
@@ -65,6 +94,7 @@ class Statements:
     source: str
     fetched_at: str
     notes: list[str] = field(default_factory=list)
+    market_data: MarketData | None = None  # price snapshot; None means valuation is not assessed
 
     @property
     def periods(self) -> list[date]:
@@ -121,6 +151,10 @@ def run_dq_checks(st: Statements, balance_tolerance: float = 0.005) -> list[DQIs
         missing = [c for c in CORE_ITEMS[st.sector] if c not in row or pd.isna(row.get(c))]
         if missing:
             issues.append(DQIssue("error", p, "core_lines", f"Missing core lines: {', '.join(missing)}"))
+        soft = [c for c in EXPECTED_ITEMS.get(st.sector, []) if c not in row or pd.isna(row.get(c))]
+        if soft:
+            issues.append(DQIssue("warning", p, "expected_lines",
+                                  f"Missing {', '.join(soft)}; dependent metrics will be n/a"))
 
         a, l, e = row.get("total_assets"), row.get("total_liabilities"), row.get("equity")
         if all(pd.notna(x) for x in (a, l, e)) and a:

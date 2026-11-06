@@ -39,6 +39,7 @@ HIGHER_IS_BETTER = {
     "equity_to_assets", "reserve_coverage", "loan_growth", "deposit_growth",
     "revenue", "gross_profit", "operating_income", "net_income", "cfo", "cash", "net_interest_income",
 }
+# valuation metrics have one period (the price date), so no direction check applies to them
 LOWER_IS_BETTER = {
     "debt_to_equity", "net_debt_to_equity", "liabilities_to_assets", "dso", "dio", "ccc",
     "sga_to_revenue", "accruals_ratio", "npl_ratio", "cost_of_risk",

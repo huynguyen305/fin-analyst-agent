@@ -104,6 +104,17 @@ _d("equity_to_assets", "health", "ratio", "equity / total_assets", BANK)
 _d("npl_ratio", "health", "ratio", "npl / loans", BANK)
 _d("reserve_coverage", "health", "ratio", "loan_loss_reserve / npl", BANK)
 _d("cost_of_risk", "health", "ratio", "provision_expense / avg(loans)", BANK)
+# valuation: one value at the price date (period = price date). Earnings = latest fiscal year,
+# or the sum of the last four quarters (TTM) for quarterly data; balances = latest period.
+_d("share_price", "valuation", "price", "last close per share", ALL_SECTORS)
+_d("market_cap", "valuation", "amount", "share_price * shares_outstanding", ALL_SECTORS)
+_d("pe", "valuation", "x", "market_cap / net_income (latest FY or TTM; positive earnings only)", ALL_SECTORS)
+_d("pb", "valuation", "x", "market_cap / equity (latest period)", ALL_SECTORS)
+_d("earnings_yield", "valuation", "ratio", "net_income (latest FY or TTM) / market_cap", ALL_SECTORS)
+_d("dividend_yield", "valuation", "ratio", "-dividends_paid (latest FY or TTM) / market_cap", ALL_SECTORS)
+_d("ps", "valuation", "x", "market_cap / revenue (latest FY or TTM)")
+_d("ev_to_ebit", "valuation", "x", "(market_cap + debt - cash) / operating_income (latest FY or TTM)")
+_d("fcf_yield", "valuation", "ratio", "(cfo + capex) (latest FY or TTM) / market_cap")
 
 
 def _avg(s: pd.Series) -> tuple[pd.Series, pd.Series]:
@@ -162,7 +173,57 @@ def compute_series(st: Statements) -> dict[str, pd.Series]:
         "cost_of_risk": _safe_div(g("provision_expense").abs(), _avg(g("loans"))[0]),
     }
     s["ccc"] = s["dso"] + s["dio"] - s["dpo"]
+    s.update(valuation_series(st))
     return s
+
+
+UNIT_SCALE = {"bn": 1e9, "mn": 1e6}
+
+
+def valuation_series(st: Statements) -> dict[str, pd.Series]:
+    """Valuation inputs as one-point series indexed by the price date (empty without market data).
+
+    Flows (earnings, revenue, cash flows) use the latest fiscal year, or the trailing four
+    quarters for quarterly data (no figure when fewer than four quarters are available).
+    """
+    names = [n for n, d in DEFS.items() if d.lens == "valuation"]
+    md = st.market_data
+    if md is None or st.data.empty or not md.price or not md.shares_outstanding:
+        return {n: pd.Series(dtype=float) for n in names}
+    g, last = st.get, st.data.index[-1]
+
+    def flow(item: str) -> float:
+        s = g(item)
+        if st.freq == "annual":
+            return s.iloc[-1]
+        tail = s.tail(4)
+        return tail.sum() if len(tail) == 4 and tail.notna().all() else float("nan")
+
+    def pos(v: float) -> float:
+        return v if pd.notna(v) and v > 0 else float("nan")
+
+    def div(a: float, b: float) -> float:
+        return a / b if pd.notna(a) and pd.notna(b) and b != 0 else float("nan")
+
+    mcap = md.price * md.shares_outstanding / UNIT_SCALE.get(st.unit, 1.0)
+    ni, rev, ebit = flow("net_income"), flow("revenue"), flow("operating_income")
+    std, ltd, cash = g("short_term_debt")[last], g("long_term_debt")[last], g("cash")[last]
+    debt = (0 if pd.isna(std) else std) + (0 if pd.isna(ltd) else ltd) if pd.notna(std) or pd.notna(ltd) else float("nan")
+    ev = mcap + debt - cash if pd.notna(debt) and pd.notna(cash) else float("nan")
+    divs = flow("dividends_paid")
+    values = {
+        "share_price": md.price,
+        "market_cap": mcap,
+        "pe": div(mcap, pos(ni)),
+        "pb": div(mcap, pos(g("equity")[last])),
+        "earnings_yield": div(ni, mcap),
+        "dividend_yield": div(-divs, mcap) if pd.notna(divs) and divs <= 0 else float("nan"),
+        "ps": div(mcap, pos(rev)),
+        "ev_to_ebit": div(ev, pos(ebit)),
+        "fcf_yield": div(flow("cfo") + flow("capex"), mcap),
+    }
+    idx = [md.price_date or str(last)]
+    return {n: pd.Series([values[n]], index=idx, dtype=float) for n in names}
 
 
 def compute_metrics(st: Statements, lenses: list[str] | None = None) -> list[Metric]:
@@ -174,7 +235,7 @@ def compute_metrics(st: Statements, lenses: list[str] | None = None) -> list[Met
             continue
         if lenses and d.lens not in lenses:
             continue
-        unit = st.unit if d.unit == "amount" else d.unit
+        unit = st.unit if d.unit == "amount" else st.currency if d.unit == "price" else d.unit
         for period, v in series[name].items():
             if v is None or (isinstance(v, float) and (math.isnan(v) or math.isinf(v))) or pd.isna(v):
                 continue

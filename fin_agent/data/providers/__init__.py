@@ -42,9 +42,16 @@ def fetch_statements(ticker: str, market: str, years: int, freq: str = "annual")
     errors: list[str] = []
     for p in build_providers(market, errors):
         try:
-            return p.fetch(ticker, years, freq)
+            st = p.fetch(ticker, years, freq)
         except ProviderError as exc:
             errors.append(f"{p.name}: {exc}")
+            continue
+        if st.market_data is None:
+            try:
+                st.market_data = p.fetch_market_data(ticker)
+            except ProviderError as exc:  # prices are optional: valuation is then not assessed
+                st.notes.append(f"market data unavailable: {exc}")
+        return st
     raise ProviderError(f"No provider could supply {ticker} ({market}). Tried: " + (" | ".join(errors) or "no provider for this market"))
 
 

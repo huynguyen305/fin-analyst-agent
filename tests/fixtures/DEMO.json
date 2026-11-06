@@ -133,5 +133,11 @@
    "capex": -1300.0,
    "dividends_paid": -800.0
   }
+ },
+ "market_data": {
+  "price": 30000.0,
+  "shares_outstanding": 1000000000.0,
+  "price_date": "2025-03-31",
+  "shares_as_of": "2024-12-31"
  }
 }
