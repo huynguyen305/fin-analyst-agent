@@ -20,6 +20,7 @@ from dataclasses import asdict, dataclass
 import pandas as pd
 
 from fin_agent.data.schema import Sector, Statements
+from fin_agent.metrics.scenarios import scenario_values
 from fin_agent.metrics.technical import indicators
 
 
@@ -57,7 +58,8 @@ class MetricDef:
     sectors: tuple[Sector, ...]
 
 
-LENSES = ("profitability", "health", "operational", "cashflow_quality", "valuation", "technical", "risk_governance")
+LENSES = ("profitability", "health", "operational", "cashflow_quality", "valuation", "technical", "scenarios",
+          "risk_governance")
 
 DEFS: dict[str, MetricDef] = {}
 
@@ -139,6 +141,26 @@ _t("volume_ratio_20_60", "x", "average volume 20 days / average volume 60 days")
 _t("rel_return_3m", "ratio", "return_3m - VN-Index return over the same days")
 _t("rel_return_6m", "ratio", "return_6m - VN-Index return over the same days")
 _t("rel_return_12m", "ratio", "return_12m - VN-Index return over the same days (index precision about 0.5%)")
+# price scenarios (fin_agent.metrics.scenarios): ranges, trend and 12-month bear/base/bull, at the price date.
+# Conditional on stated assumptions; none is a forecast of the most likely price.
+_s = lambda name, unit, formula: _d(name, "scenarios", unit, formula, ALL_SECTORS)  # noqa: E731
+_s("range_volatility", "ratio", "annualized stdev of daily log returns over up to 252 days (used for the ranges)")
+for _h, _days in (("3m", 63), ("12m", 252)):
+    _s(f"range_{_h}_low", "price", f"10th percentile price in {_days} trading days: close * exp(-1.2816 * range_volatility * sqrt({_days}/252)); zero drift, past volatility persists")
+    _s(f"range_{_h}_high", "price", f"90th percentile price in {_days} trading days: close * exp(+1.2816 * range_volatility * sqrt({_days}/252)); zero drift, past volatility persists")
+_s("trend_annual", "ratio", "annualized slope of a log-linear fit to up to 252 daily closes")
+_s("trend_r2", "ratio", "R-squared of that fit (above about 60%: a clear trend; below about 30%: no trend)")
+_s("trend_3m_price", "price", "close * exp(daily trend slope * 63): where the price would be if the trend simply continued")
+_s("trend_12m_price", "price", "close * exp(daily trend slope * 252): where the price would be if the trend simply continued")
+_REF = {"bear": "12-month low close", "base": "last close", "bull": "12-month high close"}
+_PCT = {"bear": "25th", "base": "50th", "bull": "75th"}
+for _c in ("bear", "base", "bull"):
+    _s(f"scenario_{_c}_price", "price", f"{_c} 12-month scenario: {_REF[_c]} * (1 + {_c} driver growth); driver = earnings, or book value for banks and loss-makers; constant share count")
+    _s(f"scenario_{_c}_return", "ratio", f"scenario_{_c}_price / last close - 1")
+    _s(f"scenario_{_c}_earnings_growth", "ratio", f"{_PCT[_c]} percentile of annual net income growth (positive prior years only), capped at +/-50%")
+    _s(f"scenario_{_c}_book_growth", "ratio", f"{_PCT[_c]} percentile of annual equity (book value) growth, capped at +/-50%")
+    _s(f"scenario_{_c}_pe", "x", f"P/E implied by the {_REF[_c]} with the latest earnings: pe * reference close / last close")
+    _s(f"scenario_{_c}_pb", "x", f"P/B implied by the {_REF[_c]} with the latest book value: pb * reference close / last close")
 
 
 def _avg(s: pd.Series) -> tuple[pd.Series, pd.Series]:
@@ -199,6 +221,7 @@ def compute_series(st: Statements) -> dict[str, pd.Series]:
     s["ccc"] = s["dso"] + s["dio"] - s["dpo"]
     s.update(valuation_series(st))
     s.update(technical_series(st))
+    s.update(scenario_series(st, s))
     return s
 
 
@@ -207,6 +230,29 @@ def technical_series(st: Statements) -> dict[str, pd.Series]:
     names = [n for n, d in DEFS.items() if d.lens == "technical"]
     md = st.market_data
     values = indicators(md.history, md.benchmark) if md and md.history else {}
+    if not values:
+        return {n: pd.Series(dtype=float) for n in names}
+    idx = [md.history[-1]["date"]]
+    return {n: pd.Series([values.get(n, float("nan"))], index=idx, dtype=float) for n in names}
+
+
+
+def scenario_series(st: Statements, s: dict[str, pd.Series]) -> dict[str, pd.Series]:
+    """Scenario-lens values as one-point series at the last bar's date (empty without price history).
+
+    The driver is earnings when the company is not a bank and its latest earnings are positive,
+    otherwise book value (equity); ``s`` provides today's P/E or P/B for the implied multiples.
+    """
+    names = [n for n, d in DEFS.items() if d.lens == "scenarios"]
+    md = st.market_data
+    if not md or not md.history or st.data.empty:
+        return {n: pd.Series(dtype=float) for n in names}
+    ni = st.get("net_income")
+    earnings = st.sector != Sector.BANK and pd.notna(ni.iloc[-1]) and ni.iloc[-1] > 0
+    driver, levels = ("earnings", ni) if earnings else ("book", st.get("equity"))
+    mult = s.get("pe" if earnings else "pb")
+    multiple_now = float(mult.iloc[-1]) if mult is not None and len(mult) else float("nan")
+    values = scenario_values(md.history, driver=driver, driver_levels=levels, multiple_now=multiple_now, freq=st.freq)
     if not values:
         return {n: pd.Series(dtype=float) for n in names}
     idx = [md.history[-1]["date"]]

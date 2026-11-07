@@ -13,8 +13,9 @@ def merge_dict(old: dict | None, new: dict | None) -> dict:
 
 DEPTH_LENSES = {
     "quick": ["profitability", "health"],
-    "standard": ["profitability", "health", "operational", "cashflow_quality", "valuation", "technical"],
-    "360": ["profitability", "health", "operational", "cashflow_quality", "valuation", "technical", "risk_governance"],
+    "standard": ["profitability", "health", "operational", "cashflow_quality", "valuation", "technical", "scenarios"],
+    "360": ["profitability", "health", "operational", "cashflow_quality", "valuation", "technical", "scenarios",
+            "risk_governance"],
 }
 DEPTH_YEARS = {"quick": 3, "standard": 5, "360": 8}
 MAX_CRITIC_RETRIES = 2

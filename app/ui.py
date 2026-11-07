@@ -24,6 +24,7 @@ from fin_agent.llm.providers import get_provider  # noqa: E402
 from fin_agent.llm.routing import table as routing_table  # noqa: E402
 from fin_agent.llm.usage import fmt_cost, fmt_tokens, one_line, summarize  # noqa: E402
 from fin_agent.ui.genui import AgentActivity  # noqa: E402
+from fin_agent.ui.scenario_view import scenario_view  # noqa: E402
 from genui_render import Renderer  # noqa: E402
 
 load_env()
@@ -40,6 +41,15 @@ ss.setdefault("pending", None)  # interrupt payload awaiting the user
 @st.cache_resource(show_spinner=False)
 def get_app(provider_name: str):
     return build_graph(get_provider(provider_name))
+
+
+def ui_theme() -> str | None:
+    """Active Streamlit theme ("light" | "dark"), so the agent panel's accents match it; None if unknown
+    (the panel then follows the browser's prefers-color-scheme). Palettes: .streamlit/config.toml."""
+    try:
+        return st.context.theme.type
+    except Exception:  # older Streamlit or no browser context
+        return None
 
 
 with st.sidebar:
@@ -63,6 +73,7 @@ with st.sidebar:
         st.dataframe(pd.DataFrame(routing_table()), hide_index=True, use_container_width=True)
     st.divider()
     st.markdown("**Try**\n- `Phân tích HPG 5 năm, toàn diện`\n- `Quick view of VCB`\n- `Why is FPT's DSO rising?`")
+    st.caption("Theme: ⋮ menu → Settings → Light, Dark or System.")
     if st.button("New conversation"):
         ss.messages, ss.thread, ss.pending = [], None, None
         st.rerun()
@@ -96,7 +107,8 @@ def render_result(state: dict, key: str) -> None:
     c2.metric("Call", rec.get("call", "n/a"))
     c3.metric("Confidence", rec.get("confidence", "n/a"))
     st.markdown(f"**Thesis.** {rec.get('thesis', '')}")
-    t_sum, t_lens, t_metrics, t_audit = st.tabs(["Scenarios and risks", "Lenses", "Metrics", "Sources and guardrails"])
+    t_sum, t_lens, t_price, t_metrics, t_audit = st.tabs(
+        ["Scenarios and risks", "Lenses", "Price scenarios", "Metrics", "Sources and guardrails"])
     with t_sum:
         cols = st.columns(3)
         for col, (k, title) in zip(cols, (("bull_case", "🟢 Bull"), ("base_case", "⚪ Base"), ("bear_case", "🔴 Bear"))):
@@ -114,6 +126,8 @@ def render_result(state: dict, key: str) -> None:
                 for f in out.get("findings", []):
                     st.markdown(f"{icon.get(f['severity'], '•')} {f['claim']}")
                     st.caption(" · ".join(f"`{i}` = {by_id[i]['display']}" for i in f["metric_ids"] if i in by_id))
+    with t_price:
+        render_price_scenarios(state, state["request"]["tickers"][0], key)
     with t_metrics:
         metrics = [m for m in state.get("metrics", []) if m["lens"] != "data"]
         if metrics:
@@ -142,6 +156,50 @@ def render_result(state: dict, key: str) -> None:
         if state.get("guardrail_log"):
             st.dataframe(pd.DataFrame(state["guardrail_log"]), use_container_width=True, hide_index=True)
     st.caption(rec.get("disclaimer", ""))
+
+
+
+SCENARIO_COLORS = {"Bear": "#F43F5E", "Base": "#7C5CFF", "Bull": "#10B981"}
+
+
+def render_price_scenarios(state: dict, ticker: str, key: str) -> None:
+    """Price history, the 80% statistical band, the trend path and the 12-month bear/base/bull points."""
+    import altair as alt
+
+    view = scenario_view(state, ticker)
+    if not view:
+        out = (state.get("findings") or {}).get("scenarios") or {}
+        st.info(out.get("summary") or "Price scenarios were not assessed (needs daily prices and at least three years "
+                "of statements; quick depth skips them).")
+        return
+    st.caption(f"As of {view['price_date']}. Conditional scenarios, not forecasts: each states its assumption. "
+               f"The band covers 80% of outcomes if the past year's volatility ({view['volatility']}) persists, with no drift. "
+               f"Trend: {view['trend_annual'] or 'n/a'} a year, R² {view['trend_r2'] or 'n/a'}.")
+    hist = view["history"].assign(series="Close")
+    layers = [
+        alt.Chart(view["band"]).mark_area(opacity=0.18, color="#7C5CFF").encode(
+            x=alt.X("date:T", title=None), y=alt.Y("low:Q", title="Price", scale=alt.Scale(zero=False)), y2="high:Q",
+            tooltip=[alt.Tooltip("date:T"), alt.Tooltip("low:Q", format=",.0f", title="10th pct"),
+                     alt.Tooltip("high:Q", format=",.0f", title="90th pct")]),
+        alt.Chart(hist).mark_line(strokeWidth=1.6, color="#0EA5E9").encode(
+            x="date:T", y="close:Q", tooltip=[alt.Tooltip("date:T"), alt.Tooltip("close:Q", format=",.0f")]),
+    ]
+    if view["trend"] is not None:
+        layers.append(alt.Chart(view["trend"]).mark_line(strokeDash=[5, 4], color="#94A3B8").encode(
+            x="date:T", y="price:Q", tooltip=[alt.Tooltip("date:T"), alt.Tooltip("price:Q", format=",.0f", title="trend path")]))
+    if not view["points"].empty:
+        color = alt.Color("case:N", title="12-month scenario", legend=alt.Legend(orient="bottom"),
+                          scale=alt.Scale(domain=list(SCENARIO_COLORS), range=list(SCENARIO_COLORS.values())))
+        layers.append(alt.Chart(view["points"]).mark_point(size=110, filled=True).encode(
+            x="date:T", y="price:Q", color=color, tooltip=["case:N", "display:N"]))
+        layers.append(alt.Chart(view["points"]).mark_text(align="left", dx=9, fontWeight=600).encode(
+            x="date:T", y="price:Q", text="display:N", color=color))
+    st.altair_chart(alt.layer(*layers).properties(height=360), use_container_width=True, key=f"scen-{key}")
+    st.dataframe(view["table"], use_container_width=True, hide_index=True)
+    st.dataframe(view["ranges"], use_container_width=True, hide_index=True)
+    out = (state.get("findings") or {}).get("scenarios") or {}
+    if out.get("summary"):
+        st.markdown(f"**Analyst read.** {out['summary']}")
 
 
 def render_usage(state: dict) -> None:
@@ -182,7 +240,7 @@ def run_graph(payload, resume: bool = False) -> None:
     activity = ss.get(f"activity-{ss.thread}") if resume else None
     activity = activity or AgentActivity()
     activity.waiting = activity.finished = False  # resuming after the review checkpoint
-    renderer, panel = Renderer(), st.empty()
+    renderer, panel = Renderer(theme=ui_theme()), st.empty()
     panel.html(renderer.render(activity.specs(), activity.seq))
     for chunk in app.stream(payload, cfg, stream_mode="updates"):
         for node, update in chunk.items():
@@ -215,7 +273,7 @@ for idx, (role, kind, payload) in enumerate(ss.messages):
             st.markdown(payload)
         elif kind == "genui":
             with st.expander("Agent steps", expanded=False):
-                st.html(Renderer().render(payload, current_seq=-1))  # history: no entry animations
+                st.html(Renderer(theme=ui_theme()).render(payload, current_seq=-1))  # history: no entry animations
         else:
             render_result(payload, key=str(idx))
             render_sync(payload)

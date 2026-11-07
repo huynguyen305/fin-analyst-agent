@@ -80,6 +80,14 @@ def test_progress_animates_from_previous_value():
     assert set(REGISTRY) >= {"Timeline", "ChecklistWithProgress", "MetricCard", "ToastStack"}
 
 
+def test_renderer_theme_class():
+    spec = [{"type": "InfoBanner", "props": {"title": "x"}}]
+    assert '<div class="ga ga-dark">' in Renderer(theme="dark").render(spec)
+    assert '<div class="ga ga-light">' in Renderer(theme="light").render(spec)
+    assert '<div class="ga">' in Renderer().render(spec)  # unknown: CSS follows prefers-color-scheme
+    assert '<div class="ga">' in Renderer(theme="neon").render(spec)  # invalid values are ignored
+
+
 def test_model_routing_defaults_and_overrides(monkeypatch):
     for node in ROUTES:
         monkeypatch.delenv(f"FIN_AGENT_MODEL_{node.upper()}", raising=False)

@@ -41,6 +41,7 @@ CARD_SLOTS = [
     ("ROE", ["roe"]),
     ("RSI 14", ["rsi_14"]),
     ("12-month return", ["return_12m"]),
+    ("Base scenario 12m", ["scenario_base_price"]),
 ]
 SEVERITY_ICON = {"positive": "▲", "neutral": "●", "watch": "◆", "red_flag": "✖"}
 

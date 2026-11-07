@@ -35,6 +35,7 @@ LENS_QUERIES = {
     "cashflow_quality": "cash flow quality earnings quality accruals free cash flow dividend cover",
     "valuation": "valuation multiples P/E P/B EV/EBIT intrinsic value margin of safety",
     "technical": "technical analysis trend moving averages RSI MACD momentum volume support resistance",
+    "scenarios": "price scenarios bull base bear valuation multiple earnings growth volatility range trend forecast",
     "risk_governance": "risk and governance red flags related parties ownership management",
     "qa": "",
 }

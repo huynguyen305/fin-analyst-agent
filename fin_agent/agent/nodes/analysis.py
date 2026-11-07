@@ -21,11 +21,15 @@ from fin_agent.llm.usage import usage_entry
 LENS_CONTEXT = {
     "valuation": {"roe", "roa", "net_income_growth", "revenue_growth", "net_margin", "nii_to_avg_loans"},
     "technical": {"share_price"},
+    # scenarios read the ranges against where the price sits today, its multiples and growth record
+    "scenarios": {"share_price", "pe", "pb", "net_income_growth", "roe", "volatility_60d", "max_drawdown_12m",
+                  "pct_from_52w_high", "pct_from_52w_low", "price_vs_sma200"},
 }
 # lenses that only exist when the provider returned market data
 MARKET_LENSES = {
     "valuation": "Not assessed: no market price data for this ticker (price lookup unavailable or failed).",
     "technical": "Not assessed: no daily price history for this ticker (price lookup unavailable or failed).",
+    "scenarios": "Not assessed: price scenarios need daily price history and at least three years of statements.",
 }
 
 

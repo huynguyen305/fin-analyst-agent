@@ -51,6 +51,16 @@ DEFAULT_SKILLS: dict[tuple[str, str], str] = {
 - Relative strength: compare returns with the VN-Index; persistent underperformance needs a fundamental explanation.
 - Vietnam: daily price limits (HOSE +/-7%, HNX +/-10%, UPCoM +/-15%) and T+2 settlement can exaggerate short-term moves; thinly traded stocks give unreliable signals.
 - Never give a price target or say a level "will" be reached. State signals as conditions, e.g. "a close back above the 200-day average would end the downtrend".""",
+    ("scenarios", "all"): """\
+- These are conditional scenarios, not forecasts. Never call one "the target", "expected" or "most likely", and never say a price "will" be reached.
+- State each scenario with its assumption: bear = the year's lowest multiple with weak growth, base = today's multiple with typical growth, bull = the year's highest multiple with strong growth.
+- The statistical range is an 80% band that assumes past volatility persists and no drift: it shows how far the stock normally moves, not where it is heading.
+- Read the trend projection only with its R-squared: below about 30% there is no reliable trend, so say the projection carries little information.
+- Compare the scenarios with the 12-month range: a bull or bear price outside the 80% band needs an unusually large move, so say so.
+- A wide gap between bear and bull means high uncertainty; position size, not conviction, should reflect it.
+- Growth percentiles come from few years of history: one exceptional year moves them, so say how many years back the rates.
+- For banks and loss-makers the driver is book value (P/B), not earnings.
+- Vietnam: daily price limits (HOSE +/-7%) and thin trading can make the ranges understate gap risk.""",
     ("risk_governance", "all"): """\
 - From the statements alone, flag: rising leverage, deteriorating cash conversion, margin compression, and growth funded by debt.
 - Governance (related-party deals, ownership, board) needs disclosures that are not in the data: list what should be checked.""",
@@ -60,7 +70,8 @@ DEFAULT_SKILLS: dict[tuple[str, str], str] = {
 - Give bull, base and bear cases, at least three key risks, and what would change the view.
 - If valuation was not assessed, the call is about business quality only: say so explicitly.
 - If it was, weigh quality against price: a good business at a stretched multiple is not automatically Accumulate.
-- Technicals shape timing and position size, not the call itself: a quality business in a downtrend can still be Accumulate, staged over time.""",
+- Technicals shape timing and position size, not the call itself: a quality business in a downtrend can still be Accumulate, staged over time.
+- When price scenarios were assessed, the bull, base and bear cases may quote their scenario prices as conditional ranges with their assumptions, never as targets.""",
     ("qa", "all"): """\
 - Answer the question directly first, then the supporting figures.
 - If the data cannot answer the question, say what is missing instead of guessing.""",

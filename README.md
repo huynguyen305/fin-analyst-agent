@@ -106,6 +106,18 @@ The technical lens uses about 13 months of daily closes and volumes (free `Quote
 
 Technicals inform timing and position size, not the quality call, and the lens never gives price targets.
 
+### Price scenarios
+
+The **scenarios** lens (standard and 360 depth, when daily prices and 3+ years of statements exist) adds conditional 12-month price scenarios, all computed in `fin_agent/metrics/scenarios.py`:
+
+| View | How it is computed | Reads as |
+| --- | --- | --- |
+| Statistical range | 10th-90th percentile of a lognormal price, zero drift, realized volatility of up to 252 days, at 3 and 12 months | how far the stock normally moves, not where it is heading |
+| Trend | log-linear fit of up to 252 closes: annual slope, R², and its continuation from today's close | meaningful only with a high R² |
+| Bear / base / bull | 12-month low / last / 12-month high close × (1 + 25th / 50th / 75th percentile of the company's own annual earnings growth, capped at ±50%); book value for banks and loss-makers; implied P/E or P/B shown | the year's multiple range × the company's growth range |
+
+The lens never states a target or a most-likely price; the critic checks every figure as usual. The UI's *Price scenarios* tab charts price history, the 80% band, the trend path and the three scenario points; vault reports get a *Price scenarios* table.
+
 ### Vault knowledge (GraphRAG)
 
 After intake parses the request (and data and skills are loaded), the **Knowledge Retriever** runs graph retrieval over the vault with [`langchain-graph-retriever`](https://docs.langchain.com/oss/python/integrations/retrievers/graph_rag). The graph is the vault's own structure, so no LLM extraction is needed:
@@ -162,6 +174,10 @@ Override per agent in `.env` with `FIN_AGENT_MODEL_<NODE>` and `FIN_AGENT_EFFORT
 ### Agent activity panel
 
 The UI shows the run as an animated panel, using the protocol of [AgenticGenUI](https://github.com/vivek100/AgenticGenUI): `fin_agent/ui/genui.py` turns LangGraph events into component specs (`{"type", "props"}`: Timeline, ChecklistWithProgress, ProgressBar, MetricCard, InfoBanner, ToastStack), and `app/genui_render.py` maps each type to an HTML/CSS component (unknown types fall back to raw JSON). The running step pulses, lens analysts spin and show findings as they finish, critic retries shake and raise a toast, and the progress bar shows live LLM calls, cost and models. AgenticGenUI itself is a React/Next.js + CopilotKit library; the same specs could drive its `AgentRenderer` if the UI moves to React.
+
+### Light and dark theme
+
+`.streamlit/config.toml` defines a light and a dark variant of one palette: violet primary, cyan accent, soft neutral surfaces, rounded cards, Inter (falls back to Segoe UI when Google Fonts is blocked). The app follows the system setting; each viewer can switch with ⋮ → Settings → Light, Dark or System. The agent activity panel uses the same palette: its neutrals derive from the text colour, and its accents follow `st.context.theme.type`, or the browser's `prefers-color-scheme` when that is unknown.
 
 ### Evaluating the agent with Jev
 

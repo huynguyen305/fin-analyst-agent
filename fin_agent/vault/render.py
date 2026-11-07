@@ -14,6 +14,7 @@ from datetime import date
 import yaml
 
 from fin_agent.llm.usage import fmt_tokens, one_line, summarize
+from fin_agent.ui.scenario_view import scenario_view
 
 COMPANY_ROOT = "Intelligence/Investment_Analysis/Company_Analysis"
 QA_ROOT = "Intelligence/Investment_Analysis/Analyst_QA"
@@ -77,6 +78,7 @@ def render_report(state: dict, run_id: str, day: str | None = None) -> str:
             lines += [f"### {title}"] + [f"- {x}" for x in rec[k]] + [""]
     lines += ["## Key risks"] + [f"- {x}" for x in rec.get("key_risks", [])] + [""]
     lines += ["## What would change the view"] + [f"- {x}" for x in rec.get("what_would_change_view", [])] + [""]
+    lines += scenario_section(state, ticker)
     lines.append("## Findings by lens")
     for lens, out in (state.get("findings") or {}).items():
         flag = " ⚠️ low confidence" if out.get("low_confidence") else ""
@@ -95,6 +97,28 @@ def render_report(state: dict, run_id: str, day: str | None = None) -> str:
               f"- Guardrail events: {len(state.get('guardrail_log', []))} (see run log)",
               f"- LLM usage: {one_line(summarize(state.get('llm_usage')))}", "", f"*{rec.get('disclaimer', '')}*", ""]
     return fm + "\n".join(lines)
+
+
+
+def _md_table(df) -> list[str]:
+    cols = list(df.columns)
+    return (["| " + " | ".join(cols) + " |", "| " + " | ".join("---" for _ in cols) + " |"]
+            + ["| " + " | ".join(str(r[c]) for c in cols) + " |" for _, r in df.iterrows()])
+
+
+def scenario_section(state: dict, ticker: str) -> list[str]:
+    """"Price scenarios" section: 12-month bear/base/bull and the statistical ranges (computed metrics only)."""
+    view = scenario_view(state, ticker)
+    if not view or view["table"].empty:
+        return []
+    lines = ["## Price scenarios (12 months)",
+             f"As of {view['price_date']}. Conditional scenarios, not forecasts or targets. Ranges are 80% bands assuming "
+             f"the past year's volatility ({view['volatility']}) persists with no drift; trend {view['trend_annual'] or 'n/a'} a year, "
+             f"R² {view['trend_r2'] or 'n/a'}.", ""]
+    lines += _md_table(view["table"]) + [""]
+    if not view["ranges"].empty:
+        lines += _md_table(view["ranges"]) + [""]
+    return lines
 
 
 def render_snapshot(state: dict, day: str | None = None) -> tuple[str, str]:
