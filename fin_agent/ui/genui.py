@@ -20,6 +20,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from hubkit.genui.activity import spec  # noqa: F401  (shared spec builder)
+
 ANALYSIS_STEPS = [
     ("intake", "Understanding the request"),
     ("gather", "Fetching statements and prices"),
@@ -44,10 +46,6 @@ CARD_SLOTS = [
     ("Base scenario 12m", ["scenario_base_price"]),
 ]
 SEVERITY_ICON = {"positive": "▲", "neutral": "●", "watch": "◆", "red_flag": "✖"}
-
-
-def spec(type_: str, **props: Any) -> dict:
-    return {"type": type_, "props": props}
 
 
 @dataclass

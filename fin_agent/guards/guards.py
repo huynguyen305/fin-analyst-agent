@@ -88,5 +88,6 @@ def ensure_disclaimer(text: str, language: str) -> str:
     if not text.strip():
         from fin_agent.agent.prompts import DISCLAIMER
         return DISCLAIMER.get(language, DISCLAIMER["en"])
-    out = _disclaimer_guard.validate(text, metadata={"language": language})
+    from fin_agent.agent.prompts import DISCLAIMER
+    out = _disclaimer_guard.validate(text, metadata={"language": language, "disclaimers": DISCLAIMER})
     return out.validated_output if out.validated_output is not None else text

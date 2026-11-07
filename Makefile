@@ -1,6 +1,6 @@
 .PHONY: install install-kb test demo kb-index kb-search
 install:
-	python -m venv .venv && .venv/bin/pip install -e ".[dev,vn]"
+	python -m venv .venv && .venv/bin/pip install -e ".[dev,vn]" && (test -d ../agent-hub && .venv/bin/pip install -e ../agent-hub --no-deps || true)
 install-kb:
 	.venv/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu && .venv/bin/pip install -e ".[kb]"
 kb-index:

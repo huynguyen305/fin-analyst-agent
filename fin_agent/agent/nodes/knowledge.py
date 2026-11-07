@@ -55,8 +55,9 @@ def get_kb():
     global _kb
     with _kb_lock:
         if _kb is None:
+            from fin_agent.knowledge import kb_dir
             from fin_agent.knowledge.store import KnowledgeBase
-            _kb = KnowledgeBase()
+            _kb = KnowledgeBase(directory=kb_dir())
         return _kb
 
 

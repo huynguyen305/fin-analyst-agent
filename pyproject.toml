@@ -12,6 +12,9 @@ dependencies = [
   "claude-agent-sdk>=0.2",
   "guardrails-ai>=0.11",
   "httpx>=0.27",  # TypeSafe Jev client (fin_agent.evals)
+  # shared Agent Hub platform (LLM layer, guards, knowledge store, vault writer, GenUI, Jev).
+  # For development against a local checkout: pip install -e ../agent-hub
+  "hubkit @ git+https://github.com/huynguyen305/agent-hub.git@v0.1.0",
 ]
 
 [project.optional-dependencies]

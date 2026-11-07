@@ -1,25 +1,6 @@
-"""Configuration from environment variables (optionally a local ``.env`` file)."""
+"""Configuration from environment variables. Moved to ``hubkit.config`` (Agent Hub ADR-H01); this name is kept as an alias so imports and patches still work."""
+import sys
 
-from __future__ import annotations
+import hubkit.config as _impl
 
-import os
-import re
-from pathlib import Path
-
-
-def load_env(path: str | Path = ".env") -> None:
-    """Minimal .env loader (KEY=VALUE lines). Existing environment variables win."""
-    p = Path(path)
-    if not p.exists():
-        return
-    for line in p.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        value = value.strip()
-        if value[:1] in ('"', "'"):
-            value = value[1:].split(value[0], 1)[0]   # quoted: keep as-is, drop anything after
-        else:
-            value = re.split(r"\s+#", value, maxsplit=1)[0].strip()  # unquoted: drop inline comment
-        os.environ.setdefault(key.strip(), value)
+sys.modules[__name__] = _impl

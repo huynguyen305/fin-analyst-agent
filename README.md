@@ -21,7 +21,9 @@ The design, decisions and roadmap live in the Obsidian vault (`MyObsidian/Projec
 git clone https://github.com/huynguyen305/fin-analyst-agent.git
 cd fin-analyst-agent
 python -m venv .venv
-.venv\Scripts\pip install -e ".[dev,ui]"
+.venv\Scripts\pip install -e ".[dev,ui]"     # also installs hubkit v0.1.0 from github.com/huynguyen305/agent-hub
+# Developing hubkit at the same time? Clone agent-hub next to this repo, then:
+#   .venv\Scripts\pip install -e ..\agent-hub --no-deps
 # HOSE/HNX/UPCoM data: vnstock 5 is only on the vendor's index (vnstock/vnai left PyPI in 2026-11)
 .venv\Scripts\pip install --extra-index-url https://vnstocks.com/api/packages vnstock
 copy .env.example .env      # then edit VAULT_PATH, SEC_USER_AGENT, VNSTOCK_API_KEY
@@ -198,18 +200,20 @@ python -m fin_agent "Analyze FPT" --json > run.json; python -m fin_agent.evals -
 
 ## Layout
 
+The domain-free platform (LLM layer, usage ledger, shared guards, knowledge store, vault writer, GenUI renderer, Jev client) lives in [`hubkit`](https://github.com/huynguyen305/agent-hub), shared with the Agent Hub. The modules marked *(hubkit)* below are aliases kept so existing imports work; Fin Analyst adds its routes, finance validators, path allowlist and index directory.
+
 ```
 fin_agent/
   agent/       graph.py (LangGraph), state.py, prompts.py, nodes/{intake,data,knowledge,analysis}.py
   data/        schema.py (canonical schema + DQ gate), providers/{vnstock_provider,edgar,fixture}.py
   metrics/     library.py (pure, tested ratio functions with metric ids), technical.py (price indicators)
-  llm/         base.py, providers.py (Claude subscription | Anthropic API | fake), routing.py (model per agent), usage.py, langchain_adapter.py
+  llm/         routing.py (model per node, on hubkit's ModelRouter); base.py, providers.py, usage.py, langchain_adapter.py (hubkit)
   ui/          genui.py (graph events → AgenticGenUI-style component specs)
-  knowledge/   vault_docs.py (notes → chunks + graph metadata), store.py (embeddings, Chroma, graph retrieval, incremental sync), __main__.py (CLI)
-  evals/       jev.py (TypeSafe Jev client), judge.py (Jev rubric for findings/recommendation/Q&A), __main__.py (CLI)
-  guards/      validators.py (Guardrails AI validators), guards.py (composed guards used by the graph)
-  vault/       render.py (notes), writer.py (git worktree + PR), sync.py (run → files + learning proposals)
-app/ui.py      Streamlit UI · app/genui_render.py (animated component registry)
+  knowledge/   __init__.py (index directory), __main__.py (CLI); vault_docs.py, store.py (hubkit: chunks, embeddings, Chroma, graph retrieval)
+  evals/       jev.py (hubkit), judge.py (Jev rubric for findings/recommendation/Q&A), __main__.py (CLI)
+  guards/      validators.py (finance validators; shared ones from hubkit), guards.py (composed guards used by the graph)
+  vault/       render.py (notes), writer.py (hubkit writer with Fin's allowlist), sync.py (run → files + learning proposals)
+app/ui.py      Streamlit UI · app/genui_render.py (hubkit renderer)
   skills/      loader.py (vault → skill packs), defaults.py (fallback rules)
 tests/         offline tests on synthetic fixtures (DEMO, DEMOBANK: invented numbers, not real issuers)
 ```

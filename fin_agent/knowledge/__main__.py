@@ -13,6 +13,7 @@ import os
 import sys
 
 from fin_agent.config import load_env
+from fin_agent.knowledge import kb_dir
 from fin_agent.knowledge.store import KnowledgeBase, KnowledgeError
 from fin_agent.knowledge.vault_docs import DEFAULT_INCLUDE
 
@@ -37,7 +38,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("stats", help="show what is indexed")
     args = ap.parse_args(argv)
 
-    kb = KnowledgeBase()
+    kb = KnowledgeBase(directory=kb_dir())
     try:
         if args.cmd == "index":
             vault = os.getenv("VAULT_PATH")
