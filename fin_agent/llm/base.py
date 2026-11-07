@@ -33,8 +33,12 @@ class LLMProvider(ABC):
     name = "base"
 
     @abstractmethod
-    def complete(self, system: str, prompt: str, json_schema: dict | None = None) -> LLMResult:
-        """Single-shot completion. With ``json_schema``, ``result.data`` holds the parsed object."""
+    def complete(self, system: str, prompt: str, json_schema: dict | None = None, *,
+                 model: str | None = None, effort: str | None = None) -> LLMResult:
+        """Single-shot completion. With ``json_schema``, ``result.data`` holds the parsed object.
+
+        ``model`` / ``effort`` come from ``fin_agent.llm.routing.route(node)``; None means the
+        provider's default."""
 
 
 def extract_json(text: str) -> Any:
@@ -56,6 +60,21 @@ def extract_json(text: str) -> Any:
             except json.JSONDecodeError:
                 continue
     raise LLMError(f"Model did not return valid JSON: {text[:200]!r}")
+
+
+def strict_schema(schema: dict) -> dict:
+    """Copy of a JSON schema with ``additionalProperties: false`` on every object, as structured
+    outputs require."""
+    if not isinstance(schema, dict):
+        return schema
+    out = dict(schema)
+    if isinstance(out.get("properties"), dict):
+        out["properties"] = {k: strict_schema(v) for k, v in out["properties"].items()}
+    if isinstance(out.get("items"), dict):
+        out["items"] = strict_schema(out["items"])
+    if out.get("type") == "object" or "properties" in out:
+        out.setdefault("additionalProperties", False)
+    return out
 
 
 def json_instruction(schema: dict) -> str:

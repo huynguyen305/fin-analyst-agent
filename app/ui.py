@@ -16,21 +16,18 @@ import streamlit as st
 from langgraph.types import Command
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from fin_agent.agent.graph import build_graph  # noqa: E402
 from fin_agent.config import load_env  # noqa: E402
 from fin_agent.llm.providers import get_provider  # noqa: E402
+from fin_agent.llm.routing import table as routing_table  # noqa: E402
 from fin_agent.llm.usage import fmt_cost, fmt_tokens, one_line, summarize  # noqa: E402
+from fin_agent.ui.genui import AgentActivity  # noqa: E402
+from genui_render import Renderer  # noqa: E402
 
 load_env()
 st.set_page_config(page_title="Fin Analyst Agent", page_icon="📊", layout="wide")
-
-NODE_LABELS = {
-    "intake": "Understanding the request", "gather": "Fetching statements + data-quality gate",
-    "quantify": "Computing metrics", "load_skills": "Loading skills from the vault",
-    "lens": "Lens analysis", "critic": "Checking every number", "recommend": "Forming the view",
-    "qa": "Answering the question", "review": "Waiting for your review", "sync": "Writing to the vault",
-}
 
 # ---------------------------------------------------------------- session
 
@@ -61,6 +58,9 @@ with st.sidebar:
         st.divider()
         st.markdown("**Session usage**")
         st.caption(f"{fmt_tokens(tot['total_tokens'])} tokens · {fmt_cost(tot)} · {tot['calls']} LLM calls")
+    with st.expander("Model per agent"):
+        st.caption("Cheapest model that does each job; override with FIN_AGENT_MODEL_<NODE> in .env")
+        st.dataframe(pd.DataFrame(routing_table()), hide_index=True, use_container_width=True)
     st.divider()
     st.markdown("**Try**\n- `Phân tích HPG 5 năm, toàn diện`\n- `Quick view of VCB`\n- `Why is FPT's DSO rising?`")
     if st.button("New conversation"):
@@ -125,6 +125,14 @@ def render_result(state: dict) -> None:
     with t_audit:
         skills = sorted({s for p in (state.get("skills") or {}).values() for s in p.get("sources", [])})
         st.markdown("**Skills used**\n" + "\n".join(f"- `{s}`" for s in skills))
+        kn = state.get("knowledge") or {}
+        hits = [h for hs in (kn.get("lens") or {}).values() for h in hs] + (kn.get("company") or [])
+        if hits:
+            rows = sorted({(h["path"], h["heading"] or h["title"], h["depth"], h["score"]) for h in hits}, key=lambda r: (r[2], -r[3]))
+            st.markdown("**Vault knowledge retrieved** (hop 0 = similarity seed, 1+ = reached via links, tags, ticker or lens)")
+            st.dataframe(pd.DataFrame(rows, columns=["note", "section", "hop", "similarity"]), use_container_width=True, hide_index=True)
+        elif kn.get("status") and kn["status"] != "ok":
+            st.caption(f"Vault knowledge: {kn['status']}")
         ds = next(iter(state.get("datasets", {}).values()), {})
         if ds:
             st.markdown(f"**Data source:** `{ds['meta']['source']}` · fetched {ds['meta']['fetched_at']}")
@@ -167,28 +175,31 @@ def render_sync(state: dict) -> None:
 
 
 def run_graph(payload, resume: bool = False) -> None:
-    """Stream the graph, showing each node as a live step; store result or pending interrupt."""
+    """Stream the graph into the animated agent panel (AgenticGenUI-style component specs);
+    store the result or the pending interrupt."""
     cfg = {"configurable": {"thread_id": ss.thread}}
-    with st.status("Working…", expanded=True) as status:
-        for chunk in app.stream(payload, cfg, stream_mode="updates"):
-            for node, update in chunk.items():
-                if node == "__interrupt__":
-                    continue
-                label = NODE_LABELS.get(node, node)
-                if node == "lens" and isinstance(update, dict):
-                    label += ": " + ", ".join((update.get("findings") or {}).keys())
-                status.write(f"✓ {label}")
-        snapshot = app.get_state(cfg)
-        interrupts = [i for t in snapshot.tasks for i in (t.interrupts or [])]
-        if interrupts:
-            ss.pending = interrupts[0].value
-            status.update(label="Waiting for you", state="running", expanded=False)
-        else:
-            ss.pending = None
-            status.update(label="Done", state="complete", expanded=False)
+    activity = ss.get(f"activity-{ss.thread}") if resume else None
+    activity = activity or AgentActivity()
+    activity.waiting = activity.finished = False  # resuming after the review checkpoint
+    renderer, panel = Renderer(), st.empty()
+    panel.html(renderer.render(activity.specs(), activity.seq))
+    for chunk in app.stream(payload, cfg, stream_mode="updates"):
+        for node, update in chunk.items():
+            activity.update(node, update)
+        panel.html(renderer.render(activity.specs(), activity.seq))
+    snapshot = app.get_state(cfg)
+    interrupts = [i for t in snapshot.tasks for i in (t.interrupts or [])]
+    ss.pending = interrupts[0].value if interrupts else None
+    activity.finish(waiting=bool(interrupts))
+    panel.html(renderer.render(activity.specs(), activity.seq))
+    ss[f"activity-{ss.thread}"] = activity
+    specs = activity.specs()
+    if resume and len(ss.messages) >= 2 and ss.messages[-2][1] == "genui":
+        ss.messages[-2] = ("assistant", "genui", specs)
     if resume and ss.messages and ss.messages[-1][1] == "state":
         ss.messages[-1] = ("assistant", "state", snapshot.values)  # same run: replace, don't duplicate
     else:
+        ss.messages.append(("assistant", "genui", specs))
         ss.messages.append(("assistant", "state", snapshot.values))
 
 
@@ -201,6 +212,9 @@ for role, kind, payload in ss.messages:
     with st.chat_message(role):
         if kind == "text":
             st.markdown(payload)
+        elif kind == "genui":
+            with st.expander("Agent steps", expanded=False):
+                st.html(Renderer().render(payload, current_seq=-1))  # history: no entry animations
         else:
             render_result(payload)
             render_sync(payload)

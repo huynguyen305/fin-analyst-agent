@@ -26,6 +26,11 @@ python -m venv .venv
 .venv\Scripts\pip install --extra-index-url https://vnstocks.com/api/packages vnstock
 copy .env.example .env      # then edit VAULT_PATH, SEC_USER_AGENT, VNSTOCK_API_KEY
 
+# Optional: vault knowledge base (GraphRAG). Local embeddings, nothing leaves the machine.
+.venv\Scripts\pip install torch --index-url https://download.pytorch.org/whl/cpu
+.venv\Scripts\pip install -e ".[kb]"
+.venv\Scripts\python -m fin_agent.knowledge index        # first run downloads the model and embeds ~3k chunks
+
 # Uses your Claude subscription through the Claude Code CLI login (run `claude` once to sign in)
 .venv\Scripts\python -m fin_agent "Phân tích HPG 5 năm, toàn diện"
 .venv\Scripts\python -m fin_agent "Why are FPT's receivables growing faster than revenue?"
@@ -56,6 +61,7 @@ request ─► intake (NL → ticker, period, depth; asks you if unclear)
         ─► gather (vnstock / SEC EDGAR → canonical schema → data-quality gate)
         ─► quantify (metrics library: DuPont, CCC, accruals, FCF cover, bank NIM proxy/LDR/NPL…)
         ─► load skills (vault Analyst_Skills notes, built-in fallback)
+        ─► retrieve knowledge (GraphRAG over the vault: per-lens concepts + this company's past reports)
         ─► lens analysts in parallel ─► critic (claim ↔ number check, max 2 retries) ─► recommender
         └► (questions) analyst Q&A ─► same number check
         ─► (with --sync / UI toggle) human review ─► vault writer (temp git worktree → branch → PR, never main)
@@ -82,7 +88,52 @@ Report, statements snapshot (`.md` + `.csv`) and company hub under `Intelligence
 | `standard` | + operational, cash-flow quality, valuation* | 5y |
 | `360` | + risk and governance | 8y |
 
+`standard` and `360` also run the **technical** lens when daily prices are available.
+
 \* Valuation uses the latest close and shares outstanding (vnstock 5 free endpoints `Quote.history` and `Company.overview`): share price, market cap, P/E, P/B, earnings yield, and for non-financials P/S, EV/EBIT, FCF yield and dividend yield when the statement lines exist. Multiples use the latest fiscal year (TTM for quarterly data). If the price lookup fails, valuation is reported *not assessed* rather than guessed.
+
+### Technical analysis
+
+The technical lens uses about 13 months of daily closes and volumes (free `Quote.history`) and the VN-Index. Every indicator is computed in Python (`fin_agent/metrics/technical.py`), and the LLM only interprets them:
+
+| Group | Metrics |
+| --- | --- |
+| Trend | 50- and 200-day averages, price vs each, 50 vs 200 (golden or death-cross regime) |
+| Momentum | RSI 14 (Wilder), MACD 12/26/9 histogram as % of price, returns over 1, 3, 6 and 12 months |
+| Risk | 60-day annualized volatility, 12-month max drawdown, distance from the 52-week high and low (closing basis) |
+| Participation | 20/60-day volume ratio |
+| Relative strength | 3, 6 and 12-month return minus the VN-Index (the index comes rounded, about 0.5% precision, so no beta) |
+
+Technicals inform timing and position size, not the quality call, and the lens never gives price targets.
+
+### Vault knowledge (GraphRAG)
+
+After intake parses the request (and data and skills are loaded), the **Knowledge Retriever** runs graph retrieval over the vault with [`langchain-graph-retriever`](https://docs.langchain.com/oss/python/integrations/retrievers/graph_rag). The graph is the vault's own structure, so no LLM extraction is needed:
+
+| Edge (metadata) | Meaning |
+| --- | --- |
+| `links` → `note` and back | wikilinks and `same`/`related` frontmatter, both directions; `up` links and index/MOC notes are skipped as hubs |
+| `tags` ↔ `tags` | shared tags, except hub tags on more than 15% of notes |
+| `ticker` ↔ `ticker` | the agent's own reports and data snapshots per company |
+| `fa_lens` ↔ `fa_lens` | skill notes of the same lens |
+
+- **Traversal:** `Eager` uses 4 similarity seeds and up to 2 hops. Results are ranked seeds first, then by hop and similarity, with at most 2 chunks per note.
+- **Skill notes:** already in the prompt, so they are dropped from the output, but they still seed traversal into the concept notes they link to.
+- **What counts as knowledge:** lens and Q&A retrieval filter *inside the store* on reference notes (concepts, skill rules, learnings), so dated daily briefs, index notes and company reports are never seeds or traversal steps. Filtering after retrieval returned nothing when every seed was a brief.
+- **Vietnamese questions:** intake also writes a short English `search_query`, and Q&A searches with it alone. The embedding model favours same-language matches, so even a mixed English+Vietnamese query drifted to the nearest Vietnamese note.
+- **Per lens:** 3 chunks go into a `<knowledge>` block. The recommender also gets this company's earlier reports (`ticker` filter) to say what changed. Q&A retrieves on the question itself.
+- **Safety:** retrieved text passes the injection guard. The prompt says its numbers are not metrics, and the critic still rejects any figure that doesn't match a cited metric id.
+- **Store:** Chroma, persistent in `data/knowledge/`. List metadata goes through the `ShreddingTransformer`, and a small adapter makes `langchain-graph-retriever` 0.8 work with chromadb 1.x.
+- **Embeddings:** `intfloat/multilingual-e5-small`, run locally, so Vietnamese questions match English notes.
+- **Indexing:** incremental per chunk. Unchanged text is never re-embedded, link or tag changes rewrite metadata only, and changing the model rebuilds the index.
+
+```powershell
+python -m fin_agent.knowledge index                 # incremental; --full to rebuild
+python -m fin_agent.knowledge search "cổ phiếu có quá mua không?" --ticker FPT
+python -m fin_agent.knowledge stats
+```
+
+Without an index, the agent logs `knowledge_base: skip` and runs as before. The UI's *Sources and guardrails* tab lists the retrieved notes with their hop, and vault reports link them under *Method*.
 
 ### Evaluating the agent with Jev
 
@@ -105,10 +156,11 @@ python -m fin_agent "Analyze FPT" --json > run.json; python -m fin_agent.evals -
 
 ```
 fin_agent/
-  agent/       graph.py (LangGraph), state.py, prompts.py, nodes/{intake,data,analysis}.py
+  agent/       graph.py (LangGraph), state.py, prompts.py, nodes/{intake,data,knowledge,analysis}.py
   data/        schema.py (canonical schema + DQ gate), providers/{vnstock_provider,edgar,fixture}.py
-  metrics/     library.py (pure, tested ratio functions with metric ids)
+  metrics/     library.py (pure, tested ratio functions with metric ids), technical.py (price indicators)
   llm/         base.py, providers.py (Claude subscription | Anthropic API | fake), langchain_adapter.py
+  knowledge/   vault_docs.py (notes → chunks + graph metadata), store.py (embeddings, Chroma, graph retrieval, incremental sync), __main__.py (CLI)
   evals/       jev.py (TypeSafe Jev client), judge.py (Jev rubric for findings/recommendation/Q&A), __main__.py (CLI)
   guards/      validators.py (Guardrails AI validators), guards.py (composed guards used by the graph)
   vault/       render.py (notes), writer.py (git worktree + PR), sync.py (run → files + learning proposals)
@@ -128,6 +180,9 @@ tests/         offline tests on synthetic fixtures (DEMO, DEMOBANK: invented num
 | `SEC_USER_AGENT` | Required by SEC EDGAR: `app-name your-email` |
 | `FIN_AGENT_FIXTURES` | Directory of JSON fixtures; forces offline data |
 | `FIN_AGENT_VAULT_PUSH` | `0` = commit to a local branch only, no push |
+| `FIN_AGENT_KB` | `auto` (use the vault knowledge base when indexed) or `off` |
+| `FIN_AGENT_EMBEDDINGS` | `hf:intfloat/multilingual-e5-small` (default) or `ollama:<model>`; changing it rebuilds the index |
+| `FIN_AGENT_KB_DIR` / `FIN_AGENT_KB_INCLUDE` | Index location (default `data/knowledge`) and vault folders to index |
 | `TYPESAFE_API_KEY` | Jev key for `python -m fin_agent.evals` |
 | `JEV_MODEL` | Jev model; pin e.g. `jev-1.13.0` when tuning thresholds (default `jev-latest`) |
 

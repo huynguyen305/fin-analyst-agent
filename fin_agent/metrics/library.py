@@ -20,6 +20,7 @@ from dataclasses import asdict, dataclass
 import pandas as pd
 
 from fin_agent.data.schema import Sector, Statements
+from fin_agent.metrics.technical import indicators
 
 
 @dataclass(frozen=True)
@@ -29,7 +30,7 @@ class Metric:
     lens: str
     period: str
     value: float
-    unit: str  # "ratio" | "days" | "x" | currency unit
+    unit: str  # "ratio" | "days" | "x" | "pts" (index points, e.g. RSI) | currency unit
     formula: str
 
     def display(self) -> str:
@@ -39,6 +40,8 @@ class Metric:
             return f"{self.value:.0f} days"
         if self.unit == "x":
             return f"{self.value:.2f}x"
+        if self.unit == "pts":
+            return f"{self.value:.1f}"
         return f"{self.value:,.1f} {self.unit}"
 
     def to_dict(self) -> dict:
@@ -54,7 +57,7 @@ class MetricDef:
     sectors: tuple[Sector, ...]
 
 
-LENSES = ("profitability", "health", "operational", "cashflow_quality", "valuation", "risk_governance")
+LENSES = ("profitability", "health", "operational", "cashflow_quality", "valuation", "technical", "risk_governance")
 
 DEFS: dict[str, MetricDef] = {}
 
@@ -115,6 +118,27 @@ _d("dividend_yield", "valuation", "ratio", "-dividends_paid (latest FY or TTM) /
 _d("ps", "valuation", "x", "market_cap / revenue (latest FY or TTM)")
 _d("ev_to_ebit", "valuation", "x", "(market_cap + debt - cash) / operating_income (latest FY or TTM)")
 _d("fcf_yield", "valuation", "ratio", "(cfo + capex) (latest FY or TTM) / market_cap")
+# technical: daily closes, one value at the price date; windows in trading days (fin_agent.metrics.technical)
+_t = lambda name, unit, formula: _d(name, "technical", unit, formula, ALL_SECTORS)  # noqa: E731
+_t("sma_50", "price", "mean of last 50 closes")
+_t("sma_200", "price", "mean of last 200 closes")
+_t("price_vs_sma50", "ratio", "close / sma_50 - 1")
+_t("price_vs_sma200", "ratio", "close / sma_200 - 1 (long-term trend)")
+_t("sma50_vs_sma200", "ratio", "sma_50 / sma_200 - 1 (> 0: golden-cross regime, < 0: death-cross regime)")
+_t("rsi_14", "pts", "Wilder RSI, 14 days (> 70 overbought, < 30 oversold)")
+_t("macd_hist_pct", "ratio", "(MACD 12/26 - signal 9) / close (> 0: positive momentum)")
+_t("return_1m", "ratio", "close / close 21 trading days ago - 1")
+_t("return_3m", "ratio", "close / close 63 trading days ago - 1")
+_t("return_6m", "ratio", "close / close 126 trading days ago - 1")
+_t("return_12m", "ratio", "close / close 252 trading days ago - 1")
+_t("volatility_60d", "ratio", "stdev of daily log returns over 60 days * sqrt(252)")
+_t("max_drawdown_12m", "ratio", "worst peak-to-trough fall of closes over 252 days")
+_t("pct_from_52w_high", "ratio", "close / highest close of 252 days - 1")
+_t("pct_from_52w_low", "ratio", "close / lowest close of 252 days - 1")
+_t("volume_ratio_20_60", "x", "average volume 20 days / average volume 60 days")
+_t("rel_return_3m", "ratio", "return_3m - VN-Index return over the same days")
+_t("rel_return_6m", "ratio", "return_6m - VN-Index return over the same days")
+_t("rel_return_12m", "ratio", "return_12m - VN-Index return over the same days (index precision about 0.5%)")
 
 
 def _avg(s: pd.Series) -> tuple[pd.Series, pd.Series]:
@@ -174,7 +198,19 @@ def compute_series(st: Statements) -> dict[str, pd.Series]:
     }
     s["ccc"] = s["dso"] + s["dio"] - s["dpo"]
     s.update(valuation_series(st))
+    s.update(technical_series(st))
     return s
+
+
+def technical_series(st: Statements) -> dict[str, pd.Series]:
+    """Technical indicators as one-point series at the last bar's date (empty without history)."""
+    names = [n for n, d in DEFS.items() if d.lens == "technical"]
+    md = st.market_data
+    values = indicators(md.history, md.benchmark) if md and md.history else {}
+    if not values:
+        return {n: pd.Series(dtype=float) for n in names}
+    idx = [md.history[-1]["date"]]
+    return {n: pd.Series([values.get(n, float("nan"))], index=idx, dtype=float) for n in names}
 
 
 UNIT_SCALE = {"bn": 1e9, "mn": 1e6}

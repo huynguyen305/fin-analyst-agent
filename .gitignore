@@ -9,3 +9,7 @@ dist/
 .fin_agent_cache/
 probe_output/
 logs/
+
+# local knowledge base (Chroma index + manifest)
+data/
+logs/streamlit.err.log

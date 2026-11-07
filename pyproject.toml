@@ -18,6 +18,16 @@ dependencies = [
 # vn: vnstock is quarantined on PyPI (2026-11-04) and vnstock3 depends on the removed `vnai`; see README
 api = ["anthropic>=0.40"]
 dev = ["pytest>=8"]
+# vault knowledge base (GraphRAG): local embeddings + Chroma. Install torch CPU-only first on Windows:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+kb = [
+  "langchain-graph-retriever[chroma]>=0.8,<0.9",  # 0.8 needs the Chroma 1.x shim in fin_agent/knowledge/store.py
+  "langchain-chroma>=1.1",
+  "chromadb>=1.5",
+  "langchain-huggingface>=1.2",
+  "sentence-transformers>=5",
+  "python-dateutil>=2.8.2,<3",  # chromadb pulls kubernetes (wants >=3); guardrails-ai needs <3 at runtime
+]
 ui = ["streamlit>=1.40"]
 # step 4: google-adk
 

@@ -13,8 +13,8 @@ def merge_dict(old: dict | None, new: dict | None) -> dict:
 
 DEPTH_LENSES = {
     "quick": ["profitability", "health"],
-    "standard": ["profitability", "health", "operational", "cashflow_quality", "valuation"],
-    "360": ["profitability", "health", "operational", "cashflow_quality", "valuation", "risk_governance"],
+    "standard": ["profitability", "health", "operational", "cashflow_quality", "valuation", "technical"],
+    "360": ["profitability", "health", "operational", "cashflow_quality", "valuation", "technical", "risk_governance"],
 }
 DEPTH_YEARS = {"quick": 3, "standard": 5, "360": 8}
 MAX_CRITIC_RETRIES = 2
@@ -30,6 +30,7 @@ class Request(TypedDict, total=False):
     depth: str  # quick | standard | 360
     question: str
     language: str  # en | vi
+    search_query: str | None  # English concept query for the vault knowledge base (from intake)
 
 
 class AgentState(TypedDict, total=False):
@@ -40,6 +41,7 @@ class AgentState(TypedDict, total=False):
     dq_warnings: list[dict]
     metrics: list[dict]  # Metric.to_dict()
     skills: dict[str, dict]  # lens -> {"text", "sources"}
+    knowledge: dict[str, Any]  # {"status", "lens": {lens: [hit]}, "company": [hit]} (GraphRAG over the vault)
     findings: Annotated[dict[str, dict], merge_dict]  # lens -> {"findings": [...], "summary": str}
     critic: dict[str, Any]  # {"issues": {lens: [...]}, "retry": [lenses]}
     retries: int

@@ -55,19 +55,21 @@ def guard_fetched_content(text: str) -> tuple[str, list[dict]]:
     return (out.validated_output if out.validated_output is not None else text), events
 
 
-def guard_claim(finding: dict, metrics_by_id: dict) -> list[str]:
-    """Problems with one lens finding (empty list = passes)."""
+def guard_claim(finding: dict, metrics_by_id: dict, thresholds: set | None = None) -> list[str]:
+    """Problems with one lens finding (empty list = passes). ``thresholds``: rule values from the
+    lens's skill pack, which a claim may quote as a comparison."""
     out = _claim_guard.validate(
         finding.get("claim", ""),
         metadata={"metric_ids": finding.get("metric_ids", []), "metrics_by_id": metrics_by_id,
-                  "direction": finding.get("direction")},
+                  "direction": finding.get("direction"), "thresholds": thresholds},
     )
     return [r for _, r in _failures(out)]
 
 
-def guard_answer(answer: dict, metrics_by_id: dict) -> list[str]:
+def guard_answer(answer: dict, metrics_by_id: dict, thresholds: set | None = None) -> list[str]:
     out = _answer_guard.validate(
-        answer.get("answer", ""), metadata={"metric_ids": answer.get("metric_ids", []), "metrics_by_id": metrics_by_id},
+        answer.get("answer", ""),
+        metadata={"metric_ids": answer.get("metric_ids", []), "metrics_by_id": metrics_by_id, "thresholds": thresholds},
     )
     return [r for _, r in _failures(out)]
 

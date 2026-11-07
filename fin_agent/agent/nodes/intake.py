@@ -11,6 +11,7 @@ from fin_agent.agent.prompts import INTAKE_SCHEMA, INTAKE_SYSTEM
 from fin_agent.agent.state import DEPTH_YEARS, AgentState
 from fin_agent.guards.guards import guard_input
 from fin_agent.llm.base import LLMError, LLMProvider
+from fin_agent.llm.routing import route
 from fin_agent.llm.usage import usage_entry
 
 VI_CHARS = re.compile(r"[ăâđêôơưàảãáạằẳẵắặầẩẫấậèẻẽéẹềểễếệìỉĩíịòỏõóọồổỗốộờởỡớợùủũúụừửữứựỳỷỹýỵ]", re.I)
@@ -51,7 +52,7 @@ def make_intake(llm: LLMProvider):
         text, log = guard_input(text)
         calls, usage = 0, []
         try:
-            res = llm.complete(INTAKE_SYSTEM.format(today=date.today().isoformat()), text, INTAKE_SCHEMA)
+            res = llm.complete(INTAKE_SYSTEM.format(today=date.today().isoformat()), text, INTAKE_SCHEMA, **route("intake"))
             calls = 1
             usage.append(usage_entry(res.usage, "intake"))
             parsed = res.data or {}
@@ -81,6 +82,7 @@ def make_intake(llm: LLMProvider):
             "freq": "annual",
             "question": parsed.get("question") or (state["user_input"] if parsed.get("intent") == "qa" else None),
             "language": parsed.get("language") or "en",
+            "search_query": parsed.get("search_query") or None,  # English concepts, for vault retrieval
         }
         if req["years"] > 15:
             log.append({"layer": "input", "check": "period_feasibility", "action": "capped", "detail": f"{req['years']}y capped to 15y"})

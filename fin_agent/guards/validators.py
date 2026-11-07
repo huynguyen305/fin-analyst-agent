@@ -74,8 +74,38 @@ def number_matches(v: float, kind: str, half: float, m: dict) -> bool:
     return abs(abs(v) - abs(target)) <= tol + 1e-9
 
 
-def reconcile(text: str, metric_ids: list[str], by_id: dict[str, dict]) -> list[str]:
-    """Issues found when checking a claim's numbers against the metrics it cites."""
+# a rule threshold is quoted as a comparison: "above the 15% bar", "below 0.8x", "dưới ngưỡng 30%"
+COMPARISON_CUE = re.compile(
+    r"\b(above|below|over|under|than|exceed\w*|beyond|threshold|bar|guideline|benchmark|limit|cap|rule|"
+    r"at least|at most|trên|dưới|ngưỡng|vượt|hơn|tối thiểu|tối đa)\b", re.I)
+
+
+def rule_thresholds(skill_text: str) -> set[tuple[float, str]]:
+    """Numbers stated in a lens's skill rules (curated thresholds such as 0.8x, 85%, -30%)."""
+    return {(abs(v), kind) for v, kind, _ in numbers_in(skill_text or "")}
+
+
+def quoted_thresholds(text: str, thresholds: set[tuple[float, str]]) -> set[tuple[float, str]]:
+    """Threshold values the claim quotes as a comparison (cue word within 40 characters before it)."""
+    out = set()
+    for m in NUM_RE.finditer(text):
+        found = numbers_in(m.group(0))
+        if not found:
+            continue
+        v, kind, _ = found[0]
+        if (abs(v), kind) in thresholds and COMPARISON_CUE.search(text[max(0, m.start() - 40):m.start()]):
+            out.add((abs(v), kind))
+    return out
+
+
+def reconcile(text: str, metric_ids: list[str], by_id: dict[str, dict],
+              thresholds: set[tuple[float, str]] | None = None) -> list[str]:
+    """Issues found when checking a claim's numbers against the metrics it cites.
+
+    ``thresholds`` (from the lens's skill rules) lets a claim compare a metric with a curated
+    rule ("CFO/net income of 0.72x is below the 0.8x guideline"): such a number passes only
+    when it is a rule value *and* quoted as a comparison. Any other unmatched number fails.
+    """
     issues = []
     unknown = [i for i in metric_ids if i not in by_id]
     if unknown:
@@ -84,7 +114,10 @@ def reconcile(text: str, metric_ids: list[str], by_id: dict[str, dict]) -> list[
     if not cited:
         issues.append(f"No valid metric cited for: {text[:80]!r}")
         return issues
+    allowed = quoted_thresholds(text, thresholds) if thresholds else set()
     for v, kind, half in numbers_in(text):
+        if (abs(v), kind) in allowed:
+            continue
         if not any(number_matches(v, kind, half, m) for m in cited):
             issues.append(f"Number {v:g}{'%' if kind == 'pct' else ''} in {text[:60]!r} does not match any cited metric")
     return issues
@@ -98,7 +131,8 @@ class NumericReconciliation(Validator):
     """
 
     def _validate(self, value: str, metadata: dict) -> ValidationResult:
-        issues = reconcile(value, metadata.get("metric_ids", []), metadata.get("metrics_by_id", {}))
+        issues = reconcile(value, metadata.get("metric_ids", []), metadata.get("metrics_by_id", {}),
+                           metadata.get("thresholds"))
         return FailResult(error_message=" | ".join(issues)) if issues else PassResult()
 
 
@@ -189,7 +223,7 @@ INJECTION_PATTERNS = [
     r"ignore (?:all |any )?(?:previous|prior|above) (?:instructions|rules)",
     r"disregard (?:the |your )?(?:system|previous) (?:prompt|instructions)",
     r"you are now\b", r"new instructions?:", r"reveal (?:your|the) (?:system )?prompt",
-    r"</?(?:data|skill|system)>",
+    r"</?(?:data|skill|system|knowledge)>",  # fence tags used in prompts: a note must not close one early
     r"bỏ qua (?:các |mọi )?(?:hướng dẫn|chỉ dẫn)", r"quên (?:các |mọi )?(?:hướng dẫn|quy tắc)",
 ]
 

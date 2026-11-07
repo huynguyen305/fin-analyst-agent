@@ -13,8 +13,14 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 @pytest.fixture(autouse=True)
 def offline(monkeypatch):
+    from fin_agent.agent.nodes.knowledge import reset_kb
+
     monkeypatch.setenv("FIN_AGENT_FIXTURES", str(FIXTURES))
     monkeypatch.delenv("VAULT_PATH", raising=False)
+    monkeypatch.setenv("FIN_AGENT_KB", "off")  # never touch the real index or load a model; KB tests opt in
+    reset_kb()
+    yield
+    reset_kb()
 
 
 @pytest.fixture

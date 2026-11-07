@@ -87,7 +87,11 @@ def render_report(state: dict, run_id: str, day: str | None = None) -> str:
             lines.append(f"  <small>Evidence: {evidence}</small>")
     if rec.get("not_assessed"):
         lines += ["", f"> Not assessed: {', '.join(rec['not_assessed'])}"]
+    kn = state.get("knowledge") or {}
+    kn_paths = sorted({h["path"].removesuffix(".md") for hs in (kn.get("lens") or {}).values() for h in hs}
+                      | {h["path"].removesuffix(".md") for h in kn.get("company") or []})
     lines += ["", "## Method", f"- Skills used: {', '.join(skill_sources) or 'none'}",
+              f"- Knowledge retrieved: {', '.join(_wl(p) for p in kn_paths) if kn_paths else kn.get('status', 'none')}",
               f"- Guardrail events: {len(state.get('guardrail_log', []))} (see run log)",
               f"- LLM usage: {one_line(summarize(state.get('llm_usage')))}", "", f"*{rec.get('disclaimer', '')}*", ""]
     return fm + "\n".join(lines)

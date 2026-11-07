@@ -253,23 +253,32 @@ class VnstockProvider(StatementProvider):
         )
 
     def fetch_market_data(self, ticker: str) -> MarketData | None:
-        """Latest close and shares outstanding from free (Community tier) vnstock 5 endpoints:
-        ``Quote(...).history`` and ``Company(...).overview``. Older vnstock: not wired (None)."""
+        """Latest close, ~13 months of daily bars, shares outstanding and the VN-Index, from
+        free (Community tier) vnstock 5 endpoints: ``Quote(...).history`` and
+        ``Company(...).overview``. Older vnstock: not wired (None). The benchmark is optional."""
         if self._fundamental is None:
             return None
         sym = ticker.upper()
+        end = date.today()
+        start = (end - timedelta(days=HISTORY_DAYS)).isoformat()
         try:
             from vnstock import Company, Quote  # type: ignore
-            end = date.today()
-            hist = Quote(source=self.source, symbol=sym).history(
-                start=(end - timedelta(days=PRICE_LOOKBACK_DAYS)).isoformat(), end=end.isoformat())
+            hist = Quote(source=self.source, symbol=sym).history(start=start, end=end.isoformat())
             overview = Company(symbol=sym).overview()
         except Exception as exc:
             raise ProviderError(f"vnstock price lookup failed for {sym}: {type(exc).__name__}: {exc}") from exc
-        return market_data_from_frames(hist, overview, source=f"vnstock:{self.source}")
+        md = market_data_from_frames(hist, overview, source=f"vnstock:{self.source}")
+        try:  # VCI is the only free source carrying the index
+            bench = Quote(source="VCI", symbol=BENCHMARK).history(start=start, end=end.isoformat())
+            md.benchmark = bars(bench, scale=1.0, with_volume=False)
+            md.benchmark_symbol = BENCHMARK if md.benchmark else ""
+        except Exception:
+            pass  # relative-strength metrics are then skipped
+        return md
 
 
-PRICE_LOOKBACK_DAYS = 14  # covers Tet and other multi-day market closures
+HISTORY_DAYS = 400  # calendar days: >= 252 trading days for 52-week and 200-day measures
+BENCHMARK = "VNINDEX"
 
 
 def price_to_vnd(close: float) -> float:
@@ -278,7 +287,21 @@ def price_to_vnd(close: float) -> float:
     return close * 1000 if close < 1000 else close
 
 
-def market_data_from_frames(hist: pd.DataFrame, overview: pd.DataFrame, source: str) -> MarketData | None:
+def bars(hist: pd.DataFrame, scale: float, with_volume: bool = True) -> list[dict]:
+    """Daily bars as JSON-safe dicts, ascending, closes multiplied by ``scale``."""
+    if hist is None or hist.empty or "close" not in hist.columns or "time" not in hist.columns:
+        return []
+    h = hist.dropna(subset=["close"]).sort_values("time")
+    out = []
+    for t, c, v in zip(h["time"], h["close"], h["volume"] if with_volume and "volume" in h else [None] * len(h)):
+        row = {"date": pd.Timestamp(t).date().isoformat(), "close": round(float(c) * scale, 4)}
+        if with_volume:
+            row["volume"] = float(v) if v is not None and pd.notna(v) else None
+        out.append(row)
+    return out
+
+
+def market_data_from_frames(hist: pd.DataFrame, overview: pd.DataFrame, source: str) -> MarketData:
     """Build a MarketData from a vnstock price history frame and a company overview frame."""
     if hist is None or hist.empty or "close" not in hist.columns:
         raise ProviderError("no recent price history")
@@ -287,13 +310,18 @@ def market_data_from_frames(hist: pd.DataFrame, overview: pd.DataFrame, source: 
     hist = hist.dropna(subset=["close"])
     if hist.empty:
         raise ProviderError("no recent closing price")
+    if "time" in hist.columns:
+        hist = hist.sort_values("time")
     last = hist.iloc[-1]
     shares = pd.to_numeric(overview["outstanding_shares"].iloc[0], errors="coerce")
     if pd.isna(shares) or shares <= 0:
         raise ProviderError("outstanding_shares missing or zero")
     price_date = pd.Timestamp(last["time"]).date().isoformat() if "time" in hist.columns else ""
     as_of = overview["as_of_date"].iloc[0] if "as_of_date" in overview.columns else ""
+    last_close = float(last["close"])
+    scale = price_to_vnd(last_close) / last_close  # one factor for the whole series
     return MarketData(
-        price=price_to_vnd(float(last["close"])), shares_outstanding=float(shares), price_date=price_date,
+        price=last_close * scale, shares_outstanding=float(shares), price_date=price_date,
         source=source, shares_as_of=str(pd.Timestamp(as_of).date()) if as_of else "",
+        history=bars(hist, scale),
     )

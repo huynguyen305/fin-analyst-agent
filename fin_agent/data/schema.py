@@ -60,6 +60,10 @@ class MarketData:
     ``price`` is per share in full currency units (VND, USD), never thousands.
     ``shares_outstanding`` is a share count. Both may come from different dates;
     ``price_date`` is the trading day of the price, ``shares_as_of`` the count's date.
+
+    ``history`` holds daily bars ``{"date", "close", "volume"}`` (ascending, closes in
+    the same units as ``price``) for the technical lens; ``benchmark`` holds the
+    market index closes ``{"date", "close"}`` (any scale: only returns are used).
     """
 
     price: float
@@ -67,9 +71,12 @@ class MarketData:
     price_date: str  # ISO date
     source: str
     shares_as_of: str = ""
+    history: list[dict] = field(default_factory=list)
+    benchmark: list[dict] = field(default_factory=list)
+    benchmark_symbol: str = ""
 
     def to_dict(self) -> dict:
-        return dict(self.__dict__)
+        return {k: list(v) if isinstance(v, list) else v for k, v in self.__dict__.items()}
 
     @classmethod
     def from_dict(cls, d: dict | None) -> "MarketData | None":

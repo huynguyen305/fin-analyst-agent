@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 import pandas as pd
 
 from fin_agent.agent.state import DEPTH_LENSES, AgentState
@@ -36,9 +38,21 @@ def statements_from_state(ds: dict) -> Statements:
 def gather(state: AgentState) -> dict:
     req = state["request"]
     datasets, warnings, log = {}, [], []
-    for ticker in req["tickers"]:
+    tickers = req["tickers"]
+
+    def fetch(ticker):
         try:
-            st = fetch_statements(ticker, req["market"], req["years"], req.get("freq", "annual"))
+            return fetch_statements(ticker, req["market"], req["years"], req.get("freq", "annual")), None
+        except ProviderError as exc:
+            return None, exc
+
+    # every ticker in parallel (network-bound); results are handled in request order
+    with ThreadPoolExecutor(max_workers=max(1, min(4, len(tickers)))) as pool:
+        fetched = list(pool.map(fetch, tickers))
+    for ticker, (st, fetch_error) in zip(tickers, fetched):
+        try:
+            if fetch_error:
+                raise fetch_error
             for w in assert_quality(st):
                 warnings.append({"ticker": ticker, **w.__dict__})
         except ProviderError as exc:

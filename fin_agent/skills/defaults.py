@@ -42,6 +42,15 @@ DEFAULT_SKILLS: dict[tuple[str, str], str] = {
 - Negative or tiny earnings make P/E meaningless (it is then not computed): use P/B or EV/EBIT instead.
 - Compare with the stock's own history or sector peers only if those figures are given; never invent peer multiples.
 - For banks, P/B with ROE is the main lens; EV-based multiples do not apply.""",
+    ("technical", "all"): """\
+- Technicals describe price behaviour, not value. Use them for timing and risk, never as the reason a business is good or bad.
+- Trend: price above a rising 200-day average is an uptrend; below it, a downtrend. 50-day above 200-day (golden-cross regime) confirms; below (death-cross regime) warns.
+- Momentum: RSI above 70 is overbought, below 30 oversold; in a strong trend RSI can stay extreme, so read it with the trend. A positive MACD histogram means momentum is improving.
+- Risk: annualized volatility above about 40% or a 12-month drawdown worse than -30% means a position needs smaller size or wider tolerance.
+- Volume: a move on rising volume (20/60-day ratio above 1.2) is more credible than one on thin volume.
+- Relative strength: compare returns with the VN-Index; persistent underperformance needs a fundamental explanation.
+- Vietnam: daily price limits (HOSE +/-7%, HNX +/-10%, UPCoM +/-15%) and T+2 settlement can exaggerate short-term moves; thinly traded stocks give unreliable signals.
+- Never give a price target or say a level "will" be reached. State signals as conditions, e.g. "a close back above the 200-day average would end the downtrend".""",
     ("risk_governance", "all"): """\
 - From the statements alone, flag: rising leverage, deteriorating cash conversion, margin compression, and growth funded by debt.
 - Governance (related-party deals, ownership, board) needs disclosures that are not in the data: list what should be checked.""",
@@ -50,7 +59,8 @@ DEFAULT_SKILLS: dict[tuple[str, str], str] = {
 - Confidence (low / medium / high) depends on data coverage and agreement between lenses.
 - Give bull, base and bear cases, at least three key risks, and what would change the view.
 - If valuation was not assessed, the call is about business quality only: say so explicitly.
-- If it was, weigh quality against price: a good business at a stretched multiple is not automatically Accumulate.""",
+- If it was, weigh quality against price: a good business at a stretched multiple is not automatically Accumulate.
+- Technicals shape timing and position size, not the call itself: a quality business in a downtrend can still be Accumulate, staged over time.""",
     ("qa", "all"): """\
 - Answer the question directly first, then the supporting figures.
 - If the data cannot answer the question, say what is missing instead of guessing.""",

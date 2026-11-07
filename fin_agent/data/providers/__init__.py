@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from concurrent.futures import ThreadPoolExecutor
 
 from fin_agent.data.providers.base import ProviderError, StatementProvider
 from fin_agent.data.schema import Statements
@@ -41,16 +42,21 @@ def build_providers(market: str, setup_errors: list[str] | None = None) -> list[
 def fetch_statements(ticker: str, market: str, years: int, freq: str = "annual") -> Statements:
     errors: list[str] = []
     for p in build_providers(market, errors):
-        try:
-            st = p.fetch(ticker, years, freq)
-        except ProviderError as exc:
-            errors.append(f"{p.name}: {exc}")
-            continue
-        if st.market_data is None:
+        # statements and prices are independent network calls: run them together
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            prices = pool.submit(p.fetch_market_data, ticker)
             try:
-                st.market_data = p.fetch_market_data(ticker)
-            except ProviderError as exc:  # prices are optional: valuation is then not assessed
+                st = p.fetch(ticker, years, freq)
+            except ProviderError as exc:
+                errors.append(f"{p.name}: {exc}")
+                continue
+            try:
+                md = prices.result()
+            except ProviderError as exc:  # prices are optional: valuation and technicals are then not assessed
+                md = None
                 st.notes.append(f"market data unavailable: {exc}")
+        if st.market_data is None:
+            st.market_data = md
         return st
     raise ProviderError(f"No provider could supply {ticker} ({market}). Tried: " + (" | ".join(errors) or "no provider for this market"))
 

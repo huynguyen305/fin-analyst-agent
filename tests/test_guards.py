@@ -52,3 +52,20 @@ def test_disclaimer_added_once():
     text = ensure_disclaimer("Analysis body", "vi")
     assert "không phải tư vấn tài chính" in text
     assert ensure_disclaimer(text, "vi") == text
+
+
+def test_rule_thresholds_may_be_quoted_as_comparisons_only():
+    from fin_agent.agent.nodes.analysis import check_claim
+    from fin_agent.guards.validators import rule_thresholds
+    from fin_agent.skills.defaults import DEFAULT_SKILLS
+
+    th = rule_thresholds(DEFAULT_SKILLS[("cashflow_quality", "all")])
+    by_id = {"A.cfo_to_net_income:2025": {"value": 0.72, "unit": "x"}, "A.roe:2025": {"value": 0.236, "unit": "ratio"}}
+    ids = ["A.cfo_to_net_income:2025"]
+    assert check_claim("CFO/net income of 0.72x is below the 0.8x guideline", ids, by_id, thresholds=th) == []
+    assert check_claim("CFO/net income was 0.8x", ids, by_id, thresholds=th)  # rule value stated as data
+    assert check_claim("CFO/net income of 0.72x is below the 0.9x guideline", ids, by_id, thresholds=th)  # not a rule
+    assert check_claim("CFO/net income of 0.72x is below the 0.8x guideline", ids, by_id)  # no rules passed: strict
+    vi = {(25.0, "pct")}
+    assert check_claim("ROE dưới ngưỡng 25.0%, ở mức 23.6%", ["A.roe:2025"], by_id, thresholds=vi) == []
+    assert check_claim("ROE ở mức 25.0%", ["A.roe:2025"], by_id, thresholds=vi)

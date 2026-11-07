@@ -71,6 +71,7 @@ def usage_entry(usage: dict | None, node: str, label: str | None = None, ok: boo
         "total_tokens": sum(_int(u.get(k)) for k in TOKEN_FIELDS),
         "cost_usd": u.get("cost_usd"), "cost_source": u.get("cost_source"),
         "model": u.get("model"), "provider": u.get("provider"), "duration_ms": u.get("duration_ms"),
+        "overhead_tokens": _int(u.get("overhead_tokens")),  # input-side tokens we did not send (CLI injection)
     }
 
 
@@ -88,6 +89,8 @@ def summarize(records: Iterable[dict] | None) -> dict:
         cost_sources=sorted({r["cost_source"] for r in rows if r.get("cost_source")}),
         models=sorted({r["model"] for r in rows if r.get("model")}),
         duration_ms=sum(_int(r.get("duration_ms")) for r in rows),
+        overhead_calls=sum(1 for r in rows if _int(r.get("overhead_tokens"))),
+        overhead_tokens=sum(_int(r.get("overhead_tokens")) for r in rows),
         by_node={},
     )
     for r in rows:
@@ -116,4 +119,6 @@ def one_line(s: dict) -> str:
         f"(in {fmt_tokens(s['input_tokens'])}, out {fmt_tokens(s['output_tokens'])}, "
         f"cache write {fmt_tokens(s['cache_creation_input_tokens'])}, cache read {fmt_tokens(s['cache_read_input_tokens'])}) "
         f"· {fmt_cost(s)} · {s['duration_ms'] / 1000:.1f}s"
+        + (f" · WARNING {s['overhead_calls']} call(s) carried {fmt_tokens(s['overhead_tokens'])} injected tokens"
+           if s.get("overhead_calls") else "")
     )
