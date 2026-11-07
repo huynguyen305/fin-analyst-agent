@@ -13,3 +13,4 @@ logs/
 # local knowledge base (Chroma index + manifest)
 data/
 logs/streamlit.err.log
+logs/streamlit.log

@@ -1,0 +1,39 @@
+2026-11-07 06:32:55.740 Uvicorn server started on :::8501
+2026-11-07 06:33:02.394 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+WARNING:huggingface_hub.utils._http:Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Loading weights:   0%|          | 0/199 [00:00<?, ?it/s]Loading weights: 100%|##########| 199/199 [00:00<00:00, 2063.63it/s]
+2026-11-07 08:13:30.404 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+2026-11-07 08:13:35.449 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+2026-11-07 08:13:55.161 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+C:\Users\JohnNG\Documents\Repo\fin-analyst-agent\fin_agent\data\providers\vnstock_provider.py:266: UserWarning: \u0110ã có b\u1ea3n vnstock m\u1edbi: 5.2.2 (\u0111ang dùng 5.2.1). Chép l\u1ec7nh sau \u0111\u1ec3 c\u1eadp nh\u1eadt:
+    C:\Users\JohnNG\Documents\Repo\fin-analyst-agent\.venv\Scripts\python.exe -m pip install -U --extra-index-url https://vnstocks.com/api/packages vnstock
+C\u1eadp nh\u1eadt xong, kh\u1edfi \u0111\u1ed9ng l\u1ea1i Python r\u1ed3i ch\u1ea1y l\u1ea1i.
+(English: vnstock settings language en)
+  hist = Quote(source=self.source, symbol=sym).history(start=start, end=end.isoformat())
+2026-11-07 08:14:15.015 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+2026-11-07 08:14:15.031 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
