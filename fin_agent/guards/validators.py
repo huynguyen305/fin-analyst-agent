@@ -1,31 +1,25 @@
-"""Guardrails AI validators (Guardrails and Anti-Patterns note, layers 1 and 3).
+"""Finance validators (Guardrails and Anti-Patterns note, layers 1 and 3).
 
 Each check is a Guardrails AI ``Validator`` so it can be composed into ``Guard``s,
 reused from LangChain, and reported uniformly. Where a check needs graph context
 (computed metrics), it is passed through ``metadata``.
 
-Guardrails AI ships hub telemetry that exports traces to a remote endpoint by
-default. Financial prompts must stay local, so this module disables
-OpenTelemetry export and Guardrails metrics before the library is imported.
+The domain-free validators (prompt injection, PII, certainty language, disclaimer)
+live in ``hubkit.guards.validators`` and are re-exported here. Importing hubkit first
+also disables Guardrails telemetry before the library loads.
 """
 
 from __future__ import annotations
 
 import json
-import os
 import re
 
-os.environ.setdefault("OTEL_SDK_DISABLED", "true")
-
-from guardrails.settings import settings  # noqa: E402
-
-settings.rc.enable_metrics = False
-
+from hubkit.guards.validators import (  # noqa: F401  (re-exported for existing imports)
+    GUARANTEE_PATTERNS, INJECTION_PATTERNS, PII, PII_PATTERNS, Disclaimer, NoGuarantees, PromptInjection,
+)
 from guardrails.validators import (  # noqa: E402
     FailResult, PassResult, ValidationResult, Validator, register_validator,
 )
-
-from fin_agent.agent.prompts import DISCLAIMER  # noqa: E402
 
 # ---------------------------------------------------------------- numbers
 
@@ -166,38 +160,6 @@ class DirectionConsistency(Validator):
         return PassResult()
 
 
-# ---------------------------------------------------------------- language
-
-GUARANTEE_PATTERNS = [
-    r"\bguarantee[sd]?\b", r"\brisk[- ]free\b", r"\bcan(?:'|no)t lose\b", r"\bsure (?:to|bet)\b",
-    r"\bwill (?:definitely|certainly) (?:rise|go up|double)\b", r"\bno downside\b",
-    r"chắc chắn (?:tăng|lãi|có lời)", r"không có rủi ro", r"đảm bảo (?:lợi nhuận|lãi)", r"cam kết lợi nhuận",
-]
-
-
-@register_validator(name="fin-agent/no-guarantees", data_type="string")
-class NoGuarantees(Validator):
-    """Blocks promises of returns or certainty (EN and VI)."""
-
-    def _validate(self, value: str, metadata: dict) -> ValidationResult:
-        hits = [p for p in GUARANTEE_PATTERNS if re.search(p, value, re.I)]
-        if hits:
-            return FailResult(error_message=f"Certainty or guarantee language found: {hits}")
-        return PassResult()
-
-
-@register_validator(name="fin-agent/disclaimer", data_type="string")
-class Disclaimer(Validator):
-    """The not-financial-advice disclaimer must be present; FIX appends it."""
-
-    def _validate(self, value: str, metadata: dict) -> ValidationResult:
-        lang = metadata.get("language", "en")
-        text = DISCLAIMER.get(lang, DISCLAIMER["en"])
-        if text in value:
-            return PassResult()
-        return FailResult(error_message="Disclaimer missing", fix_value=f"{value.rstrip()}\n\n{text}")
-
-
 @register_validator(name="fin-agent/risk-balance", data_type="string")
 class RiskBalance(Validator):
     """A recommendation (JSON string) needs >= 3 risks, a bear case and view-changers (AP-09)."""
@@ -215,51 +177,3 @@ class RiskBalance(Validator):
         if not rec.get("what_would_change_view"):
             problems.append("'what would change the view' is empty")
         return FailResult(error_message="; ".join(problems)) if problems else PassResult()
-
-
-# ---------------------------------------------------------------- input
-
-INJECTION_PATTERNS = [
-    r"ignore (?:all |any )?(?:previous|prior|above) (?:instructions|rules)",
-    r"disregard (?:the |your )?(?:system|previous) (?:prompt|instructions)",
-    r"you are now\b", r"new instructions?:", r"reveal (?:your|the) (?:system )?prompt",
-    r"</?(?:data|skill|system|knowledge)>",  # fence tags used in prompts: a note must not close one early
-    r"bỏ qua (?:các |mọi )?(?:hướng dẫn|chỉ dẫn)", r"quên (?:các |mọi )?(?:hướng dẫn|quy tắc)",
-]
-
-
-@register_validator(name="fin-agent/prompt-injection", data_type="string")
-class PromptInjection(Validator):
-    """Detects instruction-like text in user input or fetched content (AP-11). FIX strips the matches."""
-
-    def _validate(self, value: str, metadata: dict) -> ValidationResult:
-        hits = [p for p in INJECTION_PATTERNS if re.search(p, value, re.I)]
-        if not hits:
-            return PassResult()
-        cleaned = value
-        for p in hits:
-            cleaned = re.sub(p, "[removed]", cleaned, flags=re.I)
-        return FailResult(error_message=f"Possible prompt injection: {hits}", fix_value=cleaned)
-
-
-PII_PATTERNS = {
-    "email": r"[\w.+-]+@[\w-]+\.[\w.]+",
-    "vn_citizen_id": r"\b0\d{11}\b",  # CCCD: 12 digits starting with 0
-    "phone": r"(?<!\d)(?:\+84|0)(?:3|5|7|8|9)\d{8}(?!\d)",
-    "account_number": r"\b\d{9,16}\b",
-}
-
-
-@register_validator(name="fin-agent/pii", data_type="string")
-class PII(Validator):
-    """Redacts personal identifiers before text reaches prompts or logs. FIX replaces them."""
-
-    def _validate(self, value: str, metadata: dict) -> ValidationResult:
-        found, cleaned = [], value
-        for label, pat in PII_PATTERNS.items():
-            if re.search(pat, cleaned):
-                found.append(label)
-                cleaned = re.sub(pat, f"[{label}]", cleaned)
-        if found:
-            return FailResult(error_message=f"PII redacted: {found}", fix_value=cleaned)
-        return PassResult()
