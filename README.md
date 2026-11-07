@@ -23,7 +23,7 @@ cd fin-analyst-agent
 python -m venv .venv
 .venv\Scripts\pip install -e ".[dev,ui]"     # also installs hubkit v0.1.0 from github.com/huynguyen305/agent-hub
 # Developing hubkit at the same time? Clone agent-hub next to this repo, then:
-#   .venv\Scripts\pip install -e ..gent-hub --no-deps
+#   .venv\Scripts\pip install -e ..\agent-hub --no-deps
 # HOSE/HNX/UPCoM data: vnstock 5 is only on the vendor's index (vnstock/vnai left PyPI in 2026-11)
 .venv\Scripts\pip install --extra-index-url https://vnstocks.com/api/packages vnstock
 copy .env.example .env      # then edit VAULT_PATH, SEC_USER_AGENT, VNSTOCK_API_KEY
