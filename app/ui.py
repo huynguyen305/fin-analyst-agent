@@ -72,7 +72,8 @@ app = get_app(provider)
 
 # ---------------------------------------------------------------- rendering
 
-def render_result(state: dict) -> None:
+def render_result(state: dict, key: str) -> None:
+    """``key`` is unique per chat message: widget keys must not repeat across the history."""
     if state.get("error"):
         st.error(state["error"])
         return
@@ -119,7 +120,7 @@ def render_result(state: dict) -> None:
             df = pd.DataFrame(metrics)
             wide = df.pivot_table(index="name", columns="period", values="display", aggfunc="first").fillna("")
             st.dataframe(wide, use_container_width=True)
-            choice = st.selectbox("Trend", sorted(df["name"].unique()), key=f"trend-{ss.thread}")
+            choice = st.selectbox("Trend", sorted(df["name"].unique()), key=f"trend-{key}")
             series = df[df["name"] == choice].set_index("period")["value"].sort_index()
             st.line_chart(series)
     with t_audit:
@@ -208,7 +209,7 @@ def run_graph(payload, resume: bool = False) -> None:
 st.title("📊 Fin Analyst Agent")
 st.caption("Financial statement analysis for HOSE (and US) companies. Numbers come from code; the model explains them.")
 
-for role, kind, payload in ss.messages:
+for idx, (role, kind, payload) in enumerate(ss.messages):
     with st.chat_message(role):
         if kind == "text":
             st.markdown(payload)
@@ -216,7 +217,7 @@ for role, kind, payload in ss.messages:
             with st.expander("Agent steps", expanded=False):
                 st.html(Renderer().render(payload, current_seq=-1))  # history: no entry animations
         else:
-            render_result(payload)
+            render_result(payload, key=str(idx))
             render_sync(payload)
             render_usage(payload)
 

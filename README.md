@@ -135,6 +135,34 @@ python -m fin_agent.knowledge stats
 
 Without an index, the agent logs `knowledge_base: skip` and runs as before. The UI's *Sources and guardrails* tab lists the retrieved notes with their hop, and vault reports link them under *Method*.
 
+### Cost and speed
+
+Each agent uses the cheapest model that does its job (`fin_agent/llm/routing.py`):
+
+| Agent | Model | Effort | Why |
+| --- | --- | --- | --- |
+| intake | Haiku 5.5 | low | parse the request into JSON, write an English search query |
+| lens analysts | Sonnet 5.5 | medium | interpret computed metrics; the critic checks every number |
+| Q&A | Sonnet 5.5 | medium | answer from cited metrics |
+| recommender | Opus 5.5 | medium | one call per run that weighs every lens into the view |
+
+Override per agent in `.env` with `FIN_AGENT_MODEL_<NODE>` and `FIN_AGENT_EFFORT_<NODE>` (e.g. `FIN_AGENT_MODEL_RECOMMEND=claude-sonnet-5-5`); the sidebar shows the routing.
+
+- **CLI isolation:** subscription calls run the Claude Code CLI with no MCP servers, claude.ai connectors, plugins or skills. Before, 2-3 calls per run carried 54k-169k tokens of injected tool definitions, which was 46-83% of each run's cost. A detector flags any call whose input is far larger than what was sent; it appears as a WARNING in the usage line.
+- **Critic:** a claim may quote a threshold from its lens's skill rules as a comparison ("below the 0.8x guideline"). Any other number must match a cited metric. Lens prompts forbid self-computed differences ("rose by 3,020.5 bn"); the analyst quotes both levels instead.
+- **Concurrency:** the lens analysts run in parallel (as before); tickers are fetched in parallel, each ticker's statements and prices concurrently; the knowledge base loads in a background thread while intake and data fetching run, and its searches run in parallel. Non-LLM time on a warm process: 6.5 s (was 29 s).
+
+| Run (FPT, standard depth) | LLM calls | Lens retries | Cost (SDK estimate) | Wall time |
+| --- | --- | --- | --- | --- |
+| Before: all Opus, injected CLI context | 9-15 | 3 | $1.97-2.87 | n/a |
+| Model routing + CLI isolation | 17 | 10 | $0.67 | 110 s |
+| + critic accepts quoted rule thresholds | 14 | 6 | $0.58 | 145 s |
+| + prompt: no self-computed deltas | 10 | 2 | $0.41 | 105 s |
+
+### Agent activity panel
+
+The UI shows the run as an animated panel, using the protocol of [AgenticGenUI](https://github.com/vivek100/AgenticGenUI): `fin_agent/ui/genui.py` turns LangGraph events into component specs (`{"type", "props"}`: Timeline, ChecklistWithProgress, ProgressBar, MetricCard, InfoBanner, ToastStack), and `app/genui_render.py` maps each type to an HTML/CSS component (unknown types fall back to raw JSON). The running step pulses, lens analysts spin and show findings as they finish, critic retries shake and raise a toast, and the progress bar shows live LLM calls, cost and models. AgenticGenUI itself is a React/Next.js + CopilotKit library; the same specs could drive its `AgentRenderer` if the UI moves to React.
+
 ### Evaluating the agent with Jev
 
 `python -m fin_agent.evals` scores agent output with [TypeSafe Jev](https://docs.typesafe.ai/api), a calibrated classifier that is far cheaper than an LLM judge (about $0.042 per million input tokens; output tokens free). The critic already checks the numbers. Jev checks the judgement, one request per finding plus two for the recommendation:
@@ -159,12 +187,13 @@ fin_agent/
   agent/       graph.py (LangGraph), state.py, prompts.py, nodes/{intake,data,knowledge,analysis}.py
   data/        schema.py (canonical schema + DQ gate), providers/{vnstock_provider,edgar,fixture}.py
   metrics/     library.py (pure, tested ratio functions with metric ids), technical.py (price indicators)
-  llm/         base.py, providers.py (Claude subscription | Anthropic API | fake), langchain_adapter.py
+  llm/         base.py, providers.py (Claude subscription | Anthropic API | fake), routing.py (model per agent), usage.py, langchain_adapter.py
+  ui/          genui.py (graph events → AgenticGenUI-style component specs)
   knowledge/   vault_docs.py (notes → chunks + graph metadata), store.py (embeddings, Chroma, graph retrieval, incremental sync), __main__.py (CLI)
   evals/       jev.py (TypeSafe Jev client), judge.py (Jev rubric for findings/recommendation/Q&A), __main__.py (CLI)
   guards/      validators.py (Guardrails AI validators), guards.py (composed guards used by the graph)
   vault/       render.py (notes), writer.py (git worktree + PR), sync.py (run → files + learning proposals)
-app/ui.py      Streamlit UI
+app/ui.py      Streamlit UI · app/genui_render.py (animated component registry)
   skills/      loader.py (vault → skill packs), defaults.py (fallback rules)
 tests/         offline tests on synthetic fixtures (DEMO, DEMOBANK: invented numbers, not real issuers)
 ```
@@ -174,7 +203,8 @@ tests/         offline tests on synthetic fixtures (DEMO, DEMOBANK: invented num
 | Variable | Meaning |
 | --- | --- |
 | `FIN_AGENT_LLM` | `claude_subscription` (default) or `anthropic_api` |
-| `FIN_AGENT_MODEL` | Optional model override |
+| `FIN_AGENT_MODEL` | Model for every agent not overridden individually |
+| `FIN_AGENT_MODEL_<NODE>` / `FIN_AGENT_EFFORT_<NODE>` | Per-agent model and effort (`INTAKE`, `LENS`, `QA`, `RECOMMEND`) |
 | `VAULT_PATH` | Local clone of the Obsidian vault |
 | `VNSTOCK_SOURCE` | `VCI` (default) or `TCBS` |
 | `SEC_USER_AGENT` | Required by SEC EDGAR: `app-name your-email` |

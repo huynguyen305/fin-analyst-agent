@@ -59,6 +59,9 @@ Metrics (id | display | formula):
 </data>
 {feedback}
 Write 2 to 5 findings for this lens, most important first. Each finding states what happened, why it matters, and cites metric ids.
+Every number you write must be a metric's display value (cite it) or a threshold from the skill rules. Do not write
+differences, sums, averages or percentage changes you worked out yourself: say "rose to 14,402.0 bn from 11,381.5 bn"
+(citing both periods), never "rose by 3,020.5 bn".
 direction: improving, deteriorating, stable or mixed. severity: positive, neutral, watch or red_flag.
 """
 

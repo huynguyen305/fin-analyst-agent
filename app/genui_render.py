@@ -134,7 +134,7 @@ def _metric(r: Renderer, p: dict, seq: int) -> str:
     kind = p.get("changeType")
     arrow = {"increase": '<span class="ga-up">▲</span> ', "decrease": '<span class="ga-down">▼</span> '}.get(kind, "")
     change = f'<div class="ga-muted">{arrow}{e(p.get("change"))}</div>' if p.get("change") else ""
-    return (f'<div class="ga-metric{_enter(p, seq)}"><div class="ga-muted">{e(p.get("title"))}</div>'
+    return (f'<div class="ga-metric{_enter(p, seq)}" title="{e(p.get("formula"))}"><div class="ga-muted">{e(p.get("title"))}</div>'
             f'<div class="ga-mv">{e(p.get("value"))}</div>{change}<div class="ga-muted">{e(p.get("description"))}</div></div>')
 
 

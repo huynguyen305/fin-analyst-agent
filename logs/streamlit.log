@@ -8,3 +8,48 @@ Collecting usage statistics. To deactivate, set browser.gatherUsageStats to fals
   Network URL: http://192.168.1.15:8501
   External URL: http://183.80.95.252:8501
 
++------------------------- Traceback (most recent call last) --------------------------+
+| C:\Users\JohnNG\Documents\Repo\fin-analyst-agent\.venv\Lib\site-packages\streamlit\r |
+| untime\scriptrunner\exec_code.py:136 in exec_func_with_error_handling                |
+|                                                                                      |
+| C:\Users\JohnNG\Documents\Repo\fin-analyst-agent\.venv\Lib\site-packages\streamlit\r |
+| untime\scriptrunner\script_runner.py:924 in code_to_exec                             |
+|                                                                                      |
+| C:\Users\JohnNG\Documents\Repo\fin-analyst-agent\app\ui.py:219 in <module>           |
+|                                                                                      |
+|   216             with st.expander("Agent steps", expanded=False):                   |
+|   217                 st.html(Renderer().render(payload, current_seq=-1))  # history |
+|   218         else:                                                                  |
+| > 219             render_result(payload)                                             |
+|   220             render_sync(payload)                                               |
+|   221             render_usage(payload)                                              |
+|   222                                                                                |
+|                                                                                      |
+| C:\Users\JohnNG\Documents\Repo\fin-analyst-agent\app\ui.py:122 in render_result      |
+|                                                                                      |
+|   119             df = pd.DataFrame(metrics)                                         |
+|   120             wide = df.pivot_table(index="name", columns="period", values="disp |
+|   121             st.dataframe(wide, use_container_width=True)                       |
+| > 122             choice = st.selectbox("Trend", sorted(df["name"].unique()), key=f" |
+|   123             series = df[df["name"] == choice].set_index("period")["value"].sor |
+|   124             st.line_chart(series)                                              |
+|   125     with t_audit:                                                              |
+|                                                                                      |
+| C:\Users\JohnNG\Documents\Repo\fin-analyst-agent\.venv\Lib\site-packages\streamlit\r |
+| untime\metrics_util.py:725 in wrapped_func                                           |
+|                                                                                      |
+| C:\Users\JohnNG\Documents\Repo\fin-analyst-agent\.venv\Lib\site-packages\streamlit\e |
+| lements\widgets\selectbox.py:635 in selectbox                                        |
+|                                                                                      |
+| C:\Users\JohnNG\Documents\Repo\fin-analyst-agent\.venv\Lib\site-packages\streamlit\e |
+| lements\widgets\selectbox.py:721 in _selectbox                                       |
+|                                                                                      |
+| C:\Users\JohnNG\Documents\Repo\fin-analyst-agent\.venv\Lib\site-packages\streamlit\e |
+| lements\lib\utils.py:318 in compute_and_register_element_id                          |
+|                                                                                      |
+| C:\Users\JohnNG\Documents\Repo\fin-analyst-agent\.venv\Lib\site-packages\streamlit\e |
+| lements\lib\utils.py:200 in _register_element_id                                     |
++--------------------------------------------------------------------------------------+
+StreamlitDuplicateElementKey: There are multiple elements with the same 
+`key='trend-6953f489'`. To fix this, please make sure that the `key` argument is unique 
+for each element you create.

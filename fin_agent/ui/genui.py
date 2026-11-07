@@ -133,7 +133,7 @@ class AgentActivity:
                 kind = "increase" if delta > 0 else "decrease" if delta < 0 else "neutral"
                 change = f"vs {p['period'][:4]}: {p['display']}"
             self.cards.append(spec("MetricCard", title=title, value=m["display"], change=change, changeType=kind,
-                                   description=f"{m['period']} · {m['formula'][:60]}", seq=self.seq))
+                                   description=m["period"], formula=m["formula"], seq=self.seq))
         self._banner("info", f"{len(metrics)} figures computed", "every number the agent may cite comes from here")
 
     def _on_retrieve(self, upd: dict) -> None:
@@ -243,7 +243,7 @@ class AgentActivity:
             return ""
         cost = sum(r.get("cost_usd") or 0 for r in rows)
         model = (rows[-1].get("model") or "").replace("claude-", "")
-        return f"{len(rows)} call{'s' if len(rows) > 1 else ''} · {model} · ${cost:.3f}"
+        return " · ".join(x for x in (f"{len(rows)} call{'s' if len(rows) > 1 else ''}", model, f"${cost:.3f}") if x)
 
     @staticmethod
     def _lens_detail(s: dict) -> str:
@@ -252,4 +252,4 @@ class AgentActivity:
         if s["status"] in ("pending", "running", "retrying"):
             return "re-checking numbers" if s["status"] == "retrying" else ""
         icons = " ".join(SEVERITY_ICON.get(x, "•") for x in s.get("severity") or [])
-        return f"{s['findings']} findings {icons}" + (f" · {s['retries']} retry" if s.get("retries") else "")
+        return f"{s['findings']} finding{'' if s['findings'] == 1 else 's'} {icons}" + (f" · {s['retries']} retry" if s.get("retries") else "")
